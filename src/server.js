@@ -62,10 +62,41 @@ async function seedIfNeeded(sql) {
   if (!sql) return { seeded: false };
   if (seedPromise) return seedPromise;
   seedPromise = (async () => {
-    const [{ count }] = await sql`SELECT COUNT(*)::int AS count FROM games`;
-    if (count > 0) return { seeded: false, count };
-    const result = await importGames(sql, { seasons: defaultSeasons(), seedOnly: false });
-    return { seeded: true, ...result };
+    const seasons = defaultSeasons();
+    let counts = [];
+    try {
+      counts = await sql`SELECT season, COUNT(*)::int AS n FROM games GROUP BY season`;
+    } catch {
+      counts = [];
+    }
+    const bySeason = {};
+    for (const row of counts) bySeason[Number(row.season)] = Number(row.n);
+    const missing = seasons.filter((s) => !bySeason[s] || bySeason[s] < 200);
+    if (!missing.length) {
+      try {
+        const meta = await sql`SELECT updated_at FROM app_meta WHERE key = 'last_import'`;
+        const stale = !meta[0] || Date.now() - new Date(meta[0].updated_at).getTime() > 15 * 60 * 1000;
+        if (stale) {
+          const current = seasons[seasons.length - 1];
+          const refreshed = await importGames(sql, {
+            seasons: [current],
+            preferBundled: false,
+            remoteTimeoutMs: 5000
+          });
+          return { seeded: false, refreshed: true, bySeason, seasons, ...refreshed };
+        }
+      } catch (err) {
+        return { seeded: false, bySeason, seasons, refreshError: err.message };
+      }
+      return { seeded: false, bySeason, seasons };
+    }
+    const result = await importGames(sql, {
+      seasons,
+      preferBundled: true,
+      seedOnly: false,
+      remoteTimeoutMs: 6000
+    });
+    return { seeded: true, missing, bySeason, ...result };
   })();
   try {
     return await seedPromise;
@@ -236,21 +267,12 @@ async function handleApi(req, res, url) {
   const dbState = { sql, db, status, error };
 
   if (pathname === '/api/bootstrap' && method === 'GET') {
+    let seed = null;
     if (sql) {
       try {
-        await seedIfNeeded(sql);
+        seed = await seedIfNeeded(sql);
       } catch (err) {
-        return json(res, 200, {
-          ok: true,
-          db: true,
-          warning: `Seed/import failed: ${err.message}`,
-          user: null,
-          season: defaultSeasons().at(-1),
-          week: 1,
-          games: [],
-          standings: [],
-          teams: listTeamAbbrs()
-        });
+        seed = { ok: false, error: err.message };
       }
     }
     const user = await currentUser(sql, req);
@@ -269,6 +291,7 @@ async function handleApi(req, res, url) {
       db,
       dbStatus: status || (db ? 'ok' : 'missing'),
       dbError: error || null,
+      seed,
       user: user ? { id: user.id, username: user.username, pool: user.pool_slug } : null,
       season,
       week,
