@@ -14,8 +14,51 @@
     historyError: null,
     filters: { homeDog: false, projOver: false, projUnder: false },
     sort: { key: 'season_points', dir: 'desc' },
-    historyTeam: 'ALL'
+    historyTeam: 'ALL',
+    historyFilters: {
+      team: 'ALL',
+      from: 2023,
+      to: 2026,
+      site: 'all',
+      weather: 'all',
+      travel: 'all',
+      distance: 'all',
+      roof: 'all',
+      role: 'all',
+      division: 'all',
+      daysOff: 'all'
+    },
+    historyMore: false,
+    historySort: { key: 'team', dir: 'asc' },
+    historyLoading: false
   };
+  const DEFAULT_HIST = {
+    team: 'ALL',
+    from: 2023,
+    to: 2026,
+    site: 'all',
+    weather: 'all',
+    travel: 'all',
+    distance: 'all',
+    roof: 'all',
+    role: 'all',
+    division: 'all',
+    daysOff: 'all'
+  };
+  const HIST_CHIP_META = [
+    { key: 'team', label: 'Team' },
+    { key: 'from', label: 'From year' },
+    { key: 'to', label: 'To year' },
+    { key: 'site', label: 'Site', names: { home: 'Home', road: 'Road' } },
+    { key: 'weather', label: 'Weather', names: { cold: 'Cold', windy: 'Windy', fair: 'Fair' } },
+    { key: 'travel', label: 'Travel', names: { east: 'East', west: 'West' } },
+    { key: 'distance', label: 'Distance', names: { local: 'Local', cross: 'Cross-country' } },
+    { key: 'roof', label: 'Roof', names: { dome: 'Dome', outdoor: 'Outdoor', retractable: 'Retractable' } },
+    { key: 'role', label: 'Role', names: { favorite: 'Favorite', underdog: 'Underdog' } },
+    { key: 'division', label: 'Division', names: { divisional: 'Divisional', 'non-div': 'Non-div' } },
+    { key: 'daysOff', label: 'Days off', names: { short: 'Short rest', normal: 'Normal', bye: 'Bye+' } }
+  ];
+  const SECONDARY_HIST = new Set(['distance', 'roof', 'role', 'division', 'daysOff']);
   let loadGen = 0;
 
   function fmtPct(v) {
@@ -66,8 +109,42 @@
     return data;
   }
   function setWho(user) {
-    who.textContent = user ? user.username : '';
+    who.textContent = user ? `${user.username} · signed in` : '';
     if (user) usernameInput.placeholder = user.username;
+  }
+
+  function historyQuery(filters) {
+    const f = filters || state.historyFilters;
+    const p = new URLSearchParams();
+    p.set('team', f.team);
+    p.set('from', String(f.from));
+    p.set('to', String(f.to));
+    p.set('site', f.site);
+    p.set('weather', f.weather);
+    p.set('travel', f.travel);
+    p.set('distance', f.distance);
+    p.set('roof', f.roof);
+    p.set('role', f.role);
+    p.set('division', f.division);
+    p.set('daysOff', f.daysOff);
+    return p.toString();
+  }
+
+  function activeHistChips() {
+    return HIST_CHIP_META.filter((meta) => {
+      const v = state.historyFilters[meta.key];
+      return String(v) !== String(DEFAULT_HIST[meta.key]);
+    }).map((meta) => {
+      const raw = state.historyFilters[meta.key];
+      const shown = meta.names && meta.names[raw] ? meta.names[raw] : raw;
+      return { key: meta.key, text: `${meta.label}: ${shown}` };
+    });
+  }
+
+  function yearsForHistory() {
+    const fromApi = (state.history && state.history.seasons) || [];
+    if (fromApi.length) return fromApi;
+    return [2023, 2024, 2025, 2026];
   }
 
   function showPageError(err) {
@@ -81,6 +158,7 @@
     if (state.page === 'history') {
       state.history = null;
       state.historyError = null;
+      state.historyLoading = true;
     } else if (state.page === 'week') {
       state.week = null;
     } else if (state.page === 'standings') {
@@ -133,15 +211,24 @@
         state.standings = standings;
       }
       if (state.page === 'history' && !state.history) {
-        const history = await api(`/api/history?team=${encodeURIComponent(state.historyTeam)}`);
+        state.historyLoading = true;
+        const history = await api(`/api/history?${historyQuery()}`);
         if (gen !== loadGen) return;
         state.history = history;
         state.historyError = null;
+        state.historyLoading = false;
+        if (history && history.seasons && history.seasons.length) {
+          const maxY = history.seasons[history.seasons.length - 1];
+          if (state.historyFilters.to === DEFAULT_HIST.to && maxY !== DEFAULT_HIST.to) {
+            state.historyFilters.to = maxY;
+          }
+        }
       }
     } catch (err) {
       if (gen !== loadGen) return;
       if (state.page === 'history') {
         state.historyError = (err && err.message) || 'Failed to load history';
+        state.historyLoading = false;
         render();
         return;
       }
@@ -322,60 +409,142 @@
     return r && r.label ? r.label : '0-0';
   }
 
-  function historyView() {
-    const h = state.history;
-    if (state.historyError) return `<p class="notice">${state.historyError}</p>`;
-    if (!h) return '<p>Loading history…</p>';
+  function optList(options, selected) {
+    return options.map((o) => {
+      const value = typeof o === 'object' ? o.value : o;
+      const label = typeof o === 'object' ? o.label : o;
+      const sel = String(value) === String(selected) ? ' selected' : '';
+      return `<option value="${value}"${sel}>${label}</option>`;
+    }).join('');
+  }
+
+  function historySortValue(row, key) {
+    if (key === 'team') return row.team || '';
+    if (key === 'games') return Number(row.games) || 0;
+    const recs = { ats: row.ats, ou: row.ou, home: row.home, road: row.road, favorite: row.favorite, dog: row.dog };
+    const rec = recs[key];
+    if (!rec || rec.pct == null) return -1;
+    return rec.pct;
+  }
+
+  function sortedHistoryRows(rows) {
+    const { key, dir } = state.historySort;
+    const copy = [...rows];
+    copy.sort((a, b) => {
+      const av = historySortValue(a, key);
+      const bv = historySortValue(b, key);
+      let cmp = 0;
+      if (typeof av === 'string' || typeof bv === 'string') cmp = String(av).localeCompare(String(bv));
+      else cmp = av - bv;
+      if (cmp === 0) cmp = String(a.team).localeCompare(String(b.team));
+      return dir === 'asc' ? cmp : -cmp;
+    });
+    return copy;
+  }
+
+  function historyFiltersForm() {
+    const f = state.historyFilters;
+    const teams = ['ALL', ...(state.bootstrap?.teams || [])];
+    const years = yearsForHistory();
+    const moreOpen = state.historyMore || activeHistChips().some((c) => SECONDARY_HIST.has(c.key));
+    const chips = activeHistChips();
+    return `<form id="hist-filters" class="hist-bar">
+      <div class="hist-row">
+        <label>Team <select name="team" title="Filter splits to one team">${optList(teams, f.team)}</select></label>
+        <label>From year <select name="from" title="Inclusive start season">${optList(years, f.from)}</select></label>
+        <label>To year <select name="to" title="Inclusive end season">${optList(years, f.to)}</select></label>
+        <label>Site <select name="site" title="Home or road games for the team">${optList([{ value: 'all', label: 'All' }, { value: 'home', label: 'Home' }, { value: 'road', label: 'Road' }], f.site)}</select></label>
+        <label>Weather <select name="weather" title="Cold ≤40°F, windy 15+ mph, fair outdoor otherwise">${optList([{ value: 'all', label: 'All' }, { value: 'cold', label: 'Cold' }, { value: 'windy', label: 'Windy' }, { value: 'fair', label: 'Fair' }], f.weather)}</select></label>
+        <label>Travel <select name="travel" title="Road games crossing 2+ time zones">${optList([{ value: 'all', label: 'All' }, { value: 'east', label: 'East' }, { value: 'west', label: 'West' }], f.travel)}</select></label>
+        <div class="hist-actions">
+          <button type="button" class="btn-more" data-hist-more aria-expanded="${moreOpen ? 'true' : 'false'}">${moreOpen ? 'Fewer filters' : 'More filters'}</button>
+          <button type="button" class="btn-reset" data-hist-reset>Reset</button>
+        </div>
+      </div>
+      <div class="hist-row" id="hist-more" ${moreOpen ? '' : 'hidden'}>
+        <label>Distance <select name="distance" title="Local = 0–1 time zones; cross-country = 2+">${optList([{ value: 'all', label: 'All' }, { value: 'local', label: 'Local' }, { value: 'cross', label: 'Cross-country' }], f.distance)}</select></label>
+        <label>Roof <select name="roof" title="Dome, outdoor, or retractable (open/closed)">${optList([{ value: 'all', label: 'All' }, { value: 'dome', label: 'Dome' }, { value: 'outdoor', label: 'Outdoor' }, { value: 'retractable', label: 'Retractable' }], f.roof)}</select></label>
+        <label>Role <select name="role" title="Favorite or underdog from the spread">${optList([{ value: 'all', label: 'All' }, { value: 'favorite', label: 'Favorite' }, { value: 'underdog', label: 'Underdog' }], f.role)}</select></label>
+        <label>Division <select name="division" title="Same-division opponents">${optList([{ value: 'all', label: 'All' }, { value: 'divisional', label: 'Divisional' }, { value: 'non-div', label: 'Non-div' }], f.division)}</select></label>
+        <label>Days off <select name="daysOff" title="Short rest ≤5 days, bye+ ≥11, else normal">${optList([{ value: 'all', label: 'All' }, { value: 'short', label: 'Short rest' }, { value: 'normal', label: 'Normal' }, { value: 'bye', label: 'Bye+' }], f.daysOff)}</select></label>
+      </div>
+      ${chips.length ? `<div class="hist-chips">${chips.map((c) => `<button type="button" class="filter-chip" data-chip-clear="${c.key}" title="Clear ${c.text}">${c.text} ×</button>`).join('')}</div>` : ''}
+    </form>
+    <p class="hist-hint">Filters narrow the schedule seed; table updates as you change them.</p>`;
+  }
+
+  function historyTable(rows) {
     const cols = [
       { key: 'team', label: 'Team', title: 'Team abbreviation' },
-      { key: 'games', label: 'G', title: 'Games in the selected range' },
+      { key: 'games', label: 'G', title: 'Games matching the current filters' },
       { key: 'ats', label: 'ATS', title: 'Against the spread record' },
       { key: 'ou', label: 'O/U', title: 'Over/under record (overs-unders-pushes)' },
-      { key: 'home', label: 'Home', title: 'Straight-up home record' },
-      { key: 'road', label: 'Road', title: 'Straight-up road record' },
-      { key: 'dome', label: 'Dome', title: 'Straight-up record in a dome or closed roof' },
-      { key: 'outdoors', label: 'Out', title: 'Straight-up record outdoors' },
-      { key: 'cold', label: 'Cold', title: 'Straight-up record in 40°F or colder' },
-      { key: 'windy', label: 'Wind', title: 'Straight-up record in 15+ mph wind' },
-      { key: 'east', label: 'East', title: 'Straight-up record traveling east 2+ time zones' },
-      { key: 'west', label: 'West', title: 'Straight-up record traveling west 2+ time zones' },
-      { key: 'short', label: 'Short', title: 'Straight-up record on short rest (5 days or fewer)' },
-      { key: 'afterW', label: 'After W', title: 'Straight-up record after a win' },
-      { key: 'afterL', label: 'After L', title: 'Straight-up record after a loss' },
-      { key: 'afterBye', label: 'After bye', title: 'Straight-up record after a bye' }
+      { key: 'home', label: 'Home', title: 'Straight-up home record in the filtered set' },
+      { key: 'road', label: 'Road', title: 'Straight-up road record in the filtered set' }
     ];
+    const sorted = sortedHistoryRows(rows);
+    const { key, dir } = state.historySort;
+    return `<div class="hist-table-wrap"><table class="hist-table">
+      <thead><tr>${cols.map((c) => {
+        const on = key === c.key;
+        const caret = on ? `<span class="caret">${dir === 'asc' ? '▲' : '▼'}</span>` : '';
+        return `<th data-hist-sort="${c.key}" title="${c.title}" class="${on ? 'sorted' : ''}">${c.label}${caret}</th>`;
+      }).join('')}</tr></thead>
+      <tbody>${sorted.map((r) => `<tr>
+        <td>${r?.team ?? ''}</td>
+        <td>${r?.games ?? 0}</td>
+        <td>${rec(r?.ats)}</td>
+        <td>${rec(r?.ou)}</td>
+        <td>${rec(r?.home)}</td>
+        <td>${rec(r?.road)}</td>
+      </tr>`).join('')}</tbody>
+    </table></div>`;
+  }
+
+  function historyView() {
+    let body;
+    if (state.historyError) body = `<p class="notice">${state.historyError}</p>`;
+    else if (state.historyLoading || !state.history) body = '<p class="hist-loading">Loading history…</p>';
+    else {
+      const rows = (state.history.rows || []).filter((r) => r && r.games > 0);
+      body = rows.length ? historyTable(rows) : '<p class="hist-empty">No games match these filters</p>';
+    }
     return `<section>
-      <div class="weekbar">
-        <h1>History</h1>
-        <label>Team
-          <select id="hist-team" title="Filter splits to one team">
-            <option value="ALL">ALL</option>
-            ${(state.bootstrap?.teams || []).map((t) => `<option value="${t}" ${t === state.historyTeam ? 'selected' : ''}>${t}</option>`).join('')}
-          </select>
-        </label>
-      </div>
-      <table>
-        <thead><tr>${cols.map((c) => `<th title="${c.title}">${c.label}</th>`).join('')}</tr></thead>
-        <tbody>${(h.rows || []).map((r) => `<tr>
-          <td>${r?.team ?? ''}</td>
-          <td>${r?.games ?? ''}</td>
-          <td>${rec(r?.ats)}</td>
-          <td>${rec(r?.ou)}</td>
-          <td>${rec(r?.home)}</td>
-          <td>${rec(r?.road)}</td>
-          <td>${rec(r?.weather?.dome)}</td>
-          <td>${rec(r?.weather?.outdoors)}</td>
-          <td>${rec(r?.weather?.cold)}</td>
-          <td>${rec(r?.weather?.windy)}</td>
-          <td>${rec(r?.travel?.east)}</td>
-          <td>${rec(r?.travel?.west)}</td>
-          <td>${rec(r?.rest?.short)}</td>
-          <td>${rec(r?.after?.win)}</td>
-          <td>${rec(r?.after?.loss)}</td>
-          <td>${rec(r?.after?.bye)}</td>
-        </tr>`).join('')}</tbody>
-      </table>
+      <h1>History</h1>
+      <p class="lede">Team performance splits · schedule seed (not your wager ledger)</p>
+      ${historyFiltersForm()}
+      ${body}
     </section>`;
+  }
+
+  function readHistForm(form) {
+    const fd = new FormData(form);
+    const next = { ...state.historyFilters };
+    for (const key of Object.keys(DEFAULT_HIST)) {
+      if (!fd.has(key)) continue;
+      let v = fd.get(key);
+      if (key === 'from' || key === 'to') v = Number(v);
+      next[key] = v;
+    }
+    if (next.from > next.to) {
+      const swap = next.from;
+      next.from = next.to;
+      next.to = swap;
+    }
+    return next;
+  }
+
+  function reloadHistory() {
+    state.historyTeam = state.historyFilters.team;
+    state.history = null;
+    state.historyError = null;
+    state.historyLoading = true;
+    render();
+    load().catch((err) => {
+      state.historyError = (err && err.message) || 'Failed to load history';
+      state.historyLoading = false;
+      render();
+    });
   }
 
   function rulesView() {
@@ -425,19 +594,41 @@
         render();
         return;
       }
+      const histSort = e.target.closest('th[data-hist-sort]');
+      if (histSort && state.page === 'history') {
+        const key = histSort.dataset.histSort;
+        if (state.historySort.key === key) state.historySort.dir = state.historySort.dir === 'asc' ? 'desc' : 'asc';
+        else state.historySort = { key, dir: key === 'team' ? 'asc' : 'desc' };
+        render();
+        return;
+      }
+      if (e.target.closest('[data-hist-more]')) {
+        state.historyMore = !state.historyMore;
+        render();
+        return;
+      }
+      if (e.target.closest('[data-hist-reset]')) {
+        state.historyFilters = { ...DEFAULT_HIST };
+        state.historyMore = false;
+        reloadHistory();
+        return;
+      }
+      const clearChip = e.target.closest('[data-chip-clear]');
+      if (clearChip) {
+        const key = clearChip.dataset.chipClear;
+        state.historyFilters[key] = DEFAULT_HIST[key];
+        reloadHistory();
+        return;
+      }
       await onPick(e);
     };
-    const hist = document.getElementById('hist-team');
-    if (hist) {
-      hist.onchange = () => {
-        state.historyTeam = hist.value;
-        state.history = null;
-        state.historyError = null;
-        render();
-        load().catch((err) => {
-          state.historyError = (err && err.message) || 'Failed to load history';
-          render();
-        });
+    const histForm = document.getElementById('hist-filters');
+    if (histForm) {
+      histForm.onsubmit = (e) => e.preventDefault();
+      histForm.onchange = () => {
+        state.historyFilters = readHistForm(histForm);
+        state.historyTeam = state.historyFilters.team;
+        reloadHistory();
       };
     }
   }

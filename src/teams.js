@@ -42,6 +42,41 @@ const TEAMS = {
 
 const TZ_WEST_OF_ET = { ET: 0, CT: 1, MT: 2, PT: 3 };
 
+const DIVISIONS = {
+  BUF: 'AFC East',
+  MIA: 'AFC East',
+  NE: 'AFC East',
+  NYJ: 'AFC East',
+  BAL: 'AFC North',
+  CIN: 'AFC North',
+  CLE: 'AFC North',
+  PIT: 'AFC North',
+  HOU: 'AFC South',
+  IND: 'AFC South',
+  JAX: 'AFC South',
+  TEN: 'AFC South',
+  DEN: 'AFC West',
+  KC: 'AFC West',
+  LAC: 'AFC West',
+  LV: 'AFC West',
+  DAL: 'NFC East',
+  NYG: 'NFC East',
+  PHI: 'NFC East',
+  WAS: 'NFC East',
+  CHI: 'NFC North',
+  DET: 'NFC North',
+  GB: 'NFC North',
+  MIN: 'NFC North',
+  ATL: 'NFC South',
+  CAR: 'NFC South',
+  NO: 'NFC South',
+  TB: 'NFC South',
+  ARI: 'NFC West',
+  LAR: 'NFC West',
+  SF: 'NFC West',
+  SEA: 'NFC West'
+};
+
 function teamAbbr(code) {
   if (!code) return '';
   const t = TEAMS[String(code).toUpperCase()];
@@ -74,11 +109,31 @@ function listTeamAbbrs() {
   return [...new Set(Object.values(TEAMS).map((t) => t.abbr))].sort();
 }
 
+function teamDivision(code) {
+  return DIVISIONS[teamAbbr(code)] || null;
+}
+
+function sameDivision(a, b) {
+  const da = teamDivision(a);
+  const db = teamDivision(b);
+  return Boolean(da && db && da === db);
+}
+
+/** Local = 0–1 time zones apart; cross-country = 2+ (same cutoff as roadTravel). */
+function distanceBucket(awayTeam, homeTeam) {
+  const delta = Math.abs(tzIndex(awayTeam) - tzIndex(homeTeam));
+  return delta >= 2 ? 'cross' : 'local';
+}
+
 module.exports = {
   TEAMS,
+  DIVISIONS,
   teamAbbr,
   teamTz,
   tzIndex,
   roadTravel,
-  listTeamAbbrs
+  listTeamAbbrs,
+  teamDivision,
+  sameDivision,
+  distanceBucket
 };
