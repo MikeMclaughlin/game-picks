@@ -66,10 +66,11 @@ function sendFile(res, filePath) {
   const ext = path.extname(filePath).toLowerCase();
   const type = MIME[ext] || 'application/octet-stream';
   const body = fs.readFileSync(filePath);
+  const noStore = ext === '.html' || ext === '.js' || ext === '.css';
   res.writeHead(200, {
     'content-type': type,
     'content-length': body.length,
-    'cache-control': ext === '.html' ? 'no-store' : 'public, max-age=3600'
+    'cache-control': noStore ? 'no-store' : 'public, max-age=3600'
   });
   res.end(body);
 }

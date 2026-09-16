@@ -54,7 +54,9 @@
     if (!btn) return;
     state.page = btn.dataset.page;
     for (const b of tabs.querySelectorAll('button')) b.classList.toggle('on', b === btn);
-    render();
+    load().catch((err) => {
+      app.innerHTML = `<p class="notice">${err.message}</p>`;
+    });
   });
 
   login.addEventListener('submit', async (e) => {
@@ -243,7 +245,7 @@
       });
     }
     return `<table>
-      <thead><tr>${cols.map((c) => `<th data-sort="${c.key}" title="${c.title}" class="${state.sort.key === c.key ? 'sorted' : ''}">${c.label}</th>`).join('')}</tr></thead>
+      <thead><tr>${cols.map((c) => `<th data-sort="${c.key}" title="${c.title}" class="${sortable && state.sort.key === c.key ? 'sorted' : ''}">${c.label}</th>`).join('')}</tr></thead>
       <tbody>${sorted.map((r, i) => `<tr class="${r.username === me ? 'me' : ''}">
         <td>${sortable ? i + 1 : r.rank}</td>
         <td>${r.username}</td>
@@ -264,22 +266,22 @@
     const h = state.history;
     if (!h) return '<p>Loading history…</p>';
     const cols = [
-      { key: 'team', title: 'Team abbreviation' },
-      { key: 'games', title: 'Games in the selected range' },
-      { key: 'ats', title: 'Against the spread record' },
-      { key: 'ou', title: 'Over/under record (overs-unders-pushes)' },
-      { key: 'home', title: 'Straight-up home record' },
-      { key: 'road', title: 'Straight-up road record' },
-      { key: 'dome', title: 'Straight-up record in a dome or closed roof' },
-      { key: 'outdoors', title: 'Straight-up record outdoors' },
-      { key: 'cold', title: 'Straight-up record in 40°F or colder' },
-      { key: 'windy', title: 'Straight-up record in 15+ mph wind' },
-      { key: 'east', title: 'Straight-up record traveling east 2+ time zones' },
-      { key: 'west', title: 'Straight-up record traveling west 2+ time zones' },
-      { key: 'short', title: 'Straight-up record on short rest (5 days or fewer)' },
-      { key: 'afterW', title: 'Straight-up record after a win' },
-      { key: 'afterL', title: 'Straight-up record after a loss' },
-      { key: 'afterBye', title: 'Straight-up record after a bye' }
+      { key: 'team', label: 'Team', title: 'Team abbreviation' },
+      { key: 'games', label: 'G', title: 'Games in the selected range' },
+      { key: 'ats', label: 'ATS', title: 'Against the spread record' },
+      { key: 'ou', label: 'O/U', title: 'Over/under record (overs-unders-pushes)' },
+      { key: 'home', label: 'Home', title: 'Straight-up home record' },
+      { key: 'road', label: 'Road', title: 'Straight-up road record' },
+      { key: 'dome', label: 'Dome', title: 'Straight-up record in a dome or closed roof' },
+      { key: 'outdoors', label: 'Out', title: 'Straight-up record outdoors' },
+      { key: 'cold', label: 'Cold', title: 'Straight-up record in 40°F or colder' },
+      { key: 'windy', label: 'Wind', title: 'Straight-up record in 15+ mph wind' },
+      { key: 'east', label: 'East', title: 'Straight-up record traveling east 2+ time zones' },
+      { key: 'west', label: 'West', title: 'Straight-up record traveling west 2+ time zones' },
+      { key: 'short', label: 'Short', title: 'Straight-up record on short rest (5 days or fewer)' },
+      { key: 'afterW', label: 'After W', title: 'Straight-up record after a win' },
+      { key: 'afterL', label: 'After L', title: 'Straight-up record after a loss' },
+      { key: 'afterBye', label: 'After bye', title: 'Straight-up record after a bye' }
     ];
     return `<section>
       <div class="weekbar">
@@ -292,7 +294,7 @@
         </label>
       </div>
       <table>
-        <thead><tr>${cols.map((c) => `<th title="${c.title}">${c.key}</th>`).join('')}</tr></thead>
+        <thead><tr>${cols.map((c) => `<th title="${c.title}">${c.label}</th>`).join('')}</tr></thead>
         <tbody>${(h.rows || []).map((r) => `<tr>
           <td>${r.team}</td>
           <td>${r.games}</td>
@@ -349,6 +351,8 @@
       if (chip) {
         const key = chip.dataset.filter;
         state.filters[key] = !state.filters[key];
+        if (key === 'projOver' && state.filters.projOver) state.filters.projUnder = false;
+        if (key === 'projUnder' && state.filters.projUnder) state.filters.projOver = false;
         render();
         return;
       }
