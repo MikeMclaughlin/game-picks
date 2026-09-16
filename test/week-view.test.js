@@ -2,7 +2,7 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { impliedPoints, projectGame, formatAtsPick, currentSeasonWeek, enrichGame, lastGameInfo } = require('../src/week-view');
+const { impliedPoints, projectGame, formatAtsPick, currentSeasonWeek, enrichGame, lastGameInfo, showRestDays, lastFiveOutright, lastFiveAts } = require('../src/week-view');
 const { roadTravel, teamCity } = require('../src/teams');
 const { UPSERT_SQL } = require('../src/nfl-data');
 
@@ -67,7 +67,7 @@ test('teamCity uses market names for two-city clubs', () => {
   assert.equal(teamCity('LA'), 'LA Rams');
 });
 
-test('lastGameInfo reports Win/Loss plus opponent and scores', () => {
+test('lastGameInfo reports Win/Loss plus margin of victory or defeat', () => {
   const prev = {
     home_team: 'DET',
     away_team: 'TB',
@@ -80,6 +80,23 @@ test('lastGameInfo reports Win/Loss plus opponent and scores', () => {
   assert.equal(info.opponent, 'TB');
   assert.equal(info.teamScore, 27);
   assert.equal(info.oppScore, 20);
+  assert.equal(info.margin, 7);
+  assert.equal(info.label, 'Win by 7');
+  const loss = lastGameInfo('TB', prev);
+  assert.equal(loss.result, 'Loss');
+  assert.equal(loss.margin, 7);
+  assert.equal(loss.label, 'Loss by 7');
+  const tie = lastGameInfo('DET', { ...prev, home_score: 20, away_score: 20 });
+  assert.equal(tie.result, 'Tie');
+  assert.equal(tie.label, 'Tie');
+});
+
+test('showRestDays hides exactly 7 days of rest', () => {
+  assert.equal(showRestDays(7), false);
+  assert.equal(showRestDays('7'), false);
+  assert.equal(showRestDays(4), true);
+  assert.equal(showRestDays(8), true);
+  assert.equal(showRestDays(null), false);
 });
 
 test('enrichGame exposes lastGame, city, short rest, and xPts from the line', () => {
@@ -125,7 +142,12 @@ test('enrichGame exposes lastGame, city, short rest, and xPts from the line', ()
   assert.equal(card.away.city, 'Detroit');
   assert.equal(card.home.city, 'Buffalo');
   assert.equal(card.away.lastGame.result, 'Win');
+  assert.equal(card.away.lastGame.margin, 7);
+  assert.equal(card.away.lastGame.label, 'Win by 7');
   assert.equal(card.home.lastGame.result, 'Loss');
+  assert.equal(card.home.lastGame.label, 'Loss by 11');
+  assert.equal(card.away.showRest, true);
+  assert.equal(card.home.showRest, true);
   assert.equal(card.away.short, true);
   assert.equal(card.home.short, true);
   assert.equal(card.implied.away, 24.5);
@@ -134,4 +156,51 @@ test('enrichGame exposes lastGame, city, short rest, and xPts from the line', ()
   assert.equal(card.xPts.home, 30);
   assert.equal(card.home.shortRestWinPct, null);
   assert.equal(card.kickoffSlot, 'slot-thu');
+});
+
+test('last-5 streaks are oldest-to-newest and skip ties/pushes', () => {
+  const team = 'SEA';
+  const before = '2026-10-20T17:00:00Z';
+  function g(id, kickoff, home, away, hs, as, spread) {
+    return {
+      game_id: id,
+      home_team: home,
+      away_team: away,
+      home_score: hs,
+      away_score: as,
+      spread_line: spread,
+      kickoff
+    };
+  }
+  const history = [
+    g('1', '2026-09-07T17:00:00Z', 'SEA', 'SF', 24, 17, 3),   // SEA W, C (margin 7 > 3)
+    g('2', '2026-09-14T17:00:00Z', 'ARI', 'SEA', 20, 20, 0),   // tie omitted outright; ATS P omitted
+    g('3', '2026-09-21T17:00:00Z', 'SEA', 'NE', 13, 16, 6),    // SEA L, F (margin -3 < 6 away covers)
+    g('4', '2026-09-28T17:00:00Z', 'GB', 'SEA', 10, 27, 3),    // SEA W, C (margin -17 < 3 away covers)
+    g('5', '2026-10-05T17:00:00Z', 'SEA', 'DET', 21, 20, 1),   // SEA W, P omitted ATS
+    g('6', '2026-10-12T17:00:00Z', 'LAR', 'SEA', 30, 10, -3),  // SEA L, F (margin 20, spread -3 home LAR favored? wait spread -3 means away favored. margin 20 > -3 home covers, SEA F)
+    g('7', '2026-10-19T17:00:00Z', 'SEA', 'KC', 28, 14, 4)     // SEA W, C
+  ];
+  assert.equal(lastFiveOutright(history, team, before), 'L-W-W-L-W');
+  assert.equal(lastFiveAts(history, team, before), 'C-F-C-F-C');
+  const later = enrichGame({
+    game_id: 'now',
+    season: 2026,
+    week: 8,
+    game_type: 'REG',
+    kickoff: before,
+    weekday: 'Sunday',
+    home_team: 'SEA',
+    away_team: 'CHI',
+    spread_line: 3,
+    total_line: 44,
+    home_rest: 7,
+    away_rest: 10,
+    home_score: null,
+    away_score: null
+  }, history);
+  assert.equal(later.home.lastFive, 'L-W-W-L-W');
+  assert.equal(later.home.lastFiveAts, 'C-F-C-F-C');
+  assert.equal(later.home.showRest, false);
+  assert.equal(later.away.showRest, true);
 });

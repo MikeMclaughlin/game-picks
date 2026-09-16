@@ -22,11 +22,13 @@ const {
   fetchClerkUser,
   upsertPoolUser
 } = require('./clerk-auth');
-const { validatePick, gradeAll, isLocked } = require('./grader');
+const { validatePick, gradeAll, isLocked, exclusivePartner, assertExclusivePicks } = require('./grader');
 const { importGames, loadSeedGames, loadSchedule2026, defaultSeasons } = require('./nfl-data');
 const { enrichGame, currentSeasonWeek } = require('./week-view');
 const { parseHistoryFilters, historyPayload } = require('./history');
 const { listTeamAbbrs } = require('./teams');
+const { persistAiPicks, listAiPicks } = require('./ai-picks');
+const { historyWindow } = require('./seasons');
 
 const ROOT = path.join(__dirname, '..');
 const PUBLIC = path.join(ROOT, 'public');
@@ -95,8 +97,19 @@ async function seedIfNeeded(sql) {
       }
       return { seeded: false, bySeason, seasons };
     }
+    const current = seasons[seasons.length - 1];
+    const backfill = missing.filter((s) => s !== current);
+    if (backfill.length) {
+      await importGames(sql, {
+        seasons: backfill,
+        preferBundled: true,
+        seedOnly: true,
+        grade: false,
+        remoteTimeoutMs: 1000
+      });
+    }
     const result = await importGames(sql, {
-      seasons,
+      seasons: missing.includes(current) || backfill.length ? [current] : missing,
       preferBundled: true,
       seedOnly: false,
       remoteTimeoutMs: 6000
@@ -280,6 +293,23 @@ function groupWagers(list) {
   return byGame;
 }
 
+async function deleteWager(sql, wagerId) {
+  await sql`DELETE FROM wager_results WHERE wager_id = ${wagerId}`;
+  await sql`DELETE FROM wager_history WHERE wager_id = ${wagerId}`;
+  await sql`DELETE FROM wagers WHERE id = ${wagerId}`;
+}
+
+async function clearExclusivePartner(sql, userId, gameId, market) {
+  const partner = exclusivePartner(market);
+  if (!partner) return null;
+  const existing = await sql`
+    SELECT id FROM wagers WHERE user_id = ${userId} AND game_id = ${gameId} AND market = ${partner}
+  `;
+  if (!existing[0]) return null;
+  await deleteWager(sql, existing[0].id);
+  return partner;
+}
+
 async function handleApi(req, res, url) {
   const pathname = url.pathname.replace(/\/+$/, '') || '/';
   const method = req.method || 'GET';
@@ -339,8 +369,15 @@ async function handleApi(req, res, url) {
       .sort((a, b) => Date.parse(a.kickoff) - Date.parse(b.kickoff));
     const wagers = user ? await userWagers(sql, user.id, weekGames.map((g) => g.game_id)) : [];
     const byGame = groupWagers(wagers);
-    const history = games.filter((g) => g.season >= season - 3);
+    const history = historyWindow(games, season);
     const cards = weekGames.map((g) => enrichGame(g, history, byGame));
+    if (sql) {
+      try {
+        await persistAiPicks(sql, cards);
+      } catch (err) {
+        console.error('persist ai picks failed', err);
+      }
+    }
     const poolId = user ? user.pool_id : sql ? (await getPool(sql)).id : null;
     const board = poolId ? await standings(sql, poolId, season, week) : [];
     return json(res, 200, {
@@ -384,8 +421,15 @@ async function handleApi(req, res, url) {
       .sort((a, b) => Date.parse(a.kickoff) - Date.parse(b.kickoff));
     const user = await currentUser(sql, req);
     const wagers = user ? await userWagers(sql, user.id, weekGames.map((g) => g.game_id)) : [];
-    const history = games.filter((g) => Number(g.season) >= season - 3);
+    const history = historyWindow(games, season);
     const cards = weekGames.map((g) => enrichGame(g, history, groupWagers(wagers)));
+    if (sql) {
+      try {
+        await persistAiPicks(sql, cards);
+      } catch (err) {
+        console.error('persist ai picks failed', err);
+      }
+    }
     const weeks = [...new Set(games.filter((g) => g.season === season && g.game_type !== 'PRE').map((g) => g.week))].sort(
       (a, b) => a - b
     );
@@ -407,8 +451,13 @@ async function handleApi(req, res, url) {
     if (!user) return signInRequired(res);
     const body = await readBody(req);
     const picks = Array.isArray(body.picks) ? body.picks : [body];
+    assertExclusivePicks(picks);
+    const ordered = [
+      ...picks.filter((p) => p && (p.selection == null || p.selection === '')),
+      ...picks.filter((p) => p && p.selection != null && p.selection !== '')
+    ];
     const saved = [];
-    for (const pick of picks) {
+    for (const pick of ordered) {
       if (!pick || !pick.game_id) continue;
       const rows = await sql`SELECT * FROM games WHERE game_id = ${pick.game_id}`;
       const game = mapGame(rows[0]);
@@ -421,14 +470,13 @@ async function handleApi(req, res, url) {
           SELECT id FROM wagers WHERE user_id = ${user.id} AND game_id = ${pick.game_id} AND market = ${pick.market}
         `;
         if (existing[0]) {
-          await sql`DELETE FROM wager_results WHERE wager_id = ${existing[0].id}`;
-          await sql`DELETE FROM wager_history WHERE wager_id = ${existing[0].id}`;
-          await sql`DELETE FROM wagers WHERE id = ${existing[0].id}`;
+          await deleteWager(sql, existing[0].id);
         }
         saved.push({ game_id: pick.game_id, market: pick.market, selection: null });
         continue;
       }
       const valid = validatePick(game, pick.market, pick.selection);
+      const cleared = await clearExclusivePartner(sql, user.id, pick.game_id, valid.market);
       const upserted = await sql`
         INSERT INTO wagers (user_id, game_id, market, selection, line_at_pick)
         VALUES (${user.id}, ${pick.game_id}, ${valid.market}, ${valid.selection}, ${valid.lineAtPick})
@@ -443,7 +491,7 @@ async function handleApi(req, res, url) {
         INSERT INTO wager_history (wager_id, user_id, game_id, market, selection, line_at_pick, action)
         VALUES (${row.id}, ${user.id}, ${row.game_id}, ${row.market}, ${row.selection}, ${row.line_at_pick}, 'upsert')
       `;
-      saved.push(row);
+      saved.push({ ...row, cleared_market: cleared });
     }
     return json(res, 200, { ok: true, picks: saved });
   }
@@ -488,6 +536,26 @@ async function handleApi(req, res, url) {
     const seedOnly = url.searchParams.get('seedOnly') === '1';
     const result = await importGames(sql, { seasons, seedOnly });
     return json(res, 200, result);
+  }
+
+  if (pathname === '/api/cron/scores' && (method === 'GET' || method === 'POST')) {
+    requireAdmin(req, url);
+    if (!sql) return dbUnavailable(res, dbState);
+    const seasonsParam = url.searchParams.get('seasons');
+    const seasons = seasonsParam
+      ? seasonsParam.split(',').map((s) => Number(s.trim())).filter(Boolean)
+      : [defaultSeasons().at(-1)];
+    const result = await importGames(sql, { seasons, seedOnly: false, remoteTimeoutMs: 8000 });
+    return json(res, 200, { ok: true, cron: true, ...result });
+  }
+
+  if (pathname === '/api/ai-picks' && method === 'GET') {
+    if (!sql) return json(res, 200, { ok: true, db: false, picks: [] });
+    const season = url.searchParams.get('season');
+    const week = url.searchParams.get('week');
+    const gameId = url.searchParams.get('game_id') || url.searchParams.get('gameId');
+    const rows = await listAiPicks(sql, { season, week, gameId });
+    return json(res, 200, { ok: true, db: true, picks: rows });
   }
 
   if (pathname === '/api/me/wagers' && method === 'GET') {

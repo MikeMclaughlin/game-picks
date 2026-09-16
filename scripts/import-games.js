@@ -3,17 +3,16 @@
 const { hasDatabase, getSql } = require('../src/db');
 const { ensureSchema } = require('../src/schema');
 const { importGames, defaultSeasons } = require('../src/nfl-data');
+const { seasonsFromYear } = require('../src/seasons');
 
 async function main() {
   const seasonsArg = process.argv.find((a) => a.startsWith('--seasons='));
   const seedOnly = process.argv.includes('--seed-only');
   const from2010 = process.argv.includes('--from-2010');
+  const from2016 = process.argv.includes('--from-2016');
   let seasons = defaultSeasons();
-  if (from2010) {
-    const end = seasons[seasons.length - 1];
-    seasons = [];
-    for (let y = 2010; y <= end; y += 1) seasons.push(y);
-  }
+  if (from2010) seasons = seasonsFromYear(2010);
+  else if (from2016) seasons = seasonsFromYear(2016);
   if (seasonsArg) {
     seasons = seasonsArg
       .slice('--seasons='.length)
@@ -22,7 +21,7 @@ async function main() {
       .filter(Boolean);
   }
   if (!hasDatabase()) {
-    const result = await importGames(null, { seasons, seedOnly: true });
+    const result = await importGames(null, { seasons, seedOnly: true, grade: false });
     console.log(JSON.stringify({ ...result, note: 'No DATABASE_URL; loaded bundled games only' }, null, 2));
     return;
   }

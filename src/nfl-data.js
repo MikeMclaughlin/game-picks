@@ -5,6 +5,7 @@ const path = require('path');
 const { teamAbbr } = require('./teams');
 
 const { execSql } = require('./schema');
+const { HISTORY_FROM_SEASON, defaultSeasons } = require('./seasons');
 
 function resolveDataFile(...rel) {
   const candidates = [
@@ -189,7 +190,11 @@ function coerceRemote(text) {
 async function fetchRemoteGames(seasons, timeoutMs = 8000) {
   const wanted = new Set((seasons || []).map(Number));
   const errors = [];
-  for (const makeUrl of REMOTE_SOURCES) {
+  const sources = wanted.size > 2
+    ? [...REMOTE_SOURCES.filter((fn) => fn.length === 0), ...REMOTE_SOURCES.filter((fn) => fn.length === 1)]
+    : REMOTE_SOURCES;
+  const csvTimeout = Math.max(timeoutMs, 12000);
+  for (const makeUrl of sources) {
     try {
       if (makeUrl.length === 1 && wanted.size) {
         const collected = [];
@@ -201,7 +206,7 @@ async function fetchRemoteGames(seasons, timeoutMs = 8000) {
           return { games: filterSeasons(collected, wanted), source: makeUrl([...wanted][0]) };
         }
       } else {
-        const text = await fetchText(makeUrl(), timeoutMs);
+        const text = await fetchText(makeUrl(), makeUrl.length === 0 ? csvTimeout : timeoutMs);
         const games = coerceRemote(text);
         if (games.length) {
           return { games: filterSeasons(games, wanted), source: makeUrl() };
@@ -309,11 +314,10 @@ async function upsertGames(sql, games, batchSize = 80) {
   return upserted;
 }
 
-function defaultSeasons(now = new Date()) {
-  const year = now.getUTCFullYear();
-  const month = now.getUTCMonth() + 1;
-  const currentSeason = month >= 3 ? year : year - 1;
-  return [currentSeason - 3, currentSeason - 2, currentSeason - 1, currentSeason];
+async function maybeGradeImported(sql, options = {}) {
+  if (!sql || options.grade === false) return null;
+  const gradeFn = options.gradeAllFn || require('./grader').gradeAll;
+  return gradeFn(sql);
 }
 
 async function importGames(sql, options = {}) {
@@ -364,6 +368,13 @@ async function importGames(sql, options = {}) {
       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()
     `;
   }
+  let grade = null;
+  let gradeError = null;
+  try {
+    grade = await maybeGradeImported(sql, options);
+  } catch (err) {
+    gradeError = err.message;
+  }
   return {
     ok: true,
     source,
@@ -371,6 +382,8 @@ async function importGames(sql, options = {}) {
     fetched: games.length,
     upserted,
     remoteErrors: remote.errors,
+    grade,
+    gradeError,
     games: sql ? undefined : games
   };
 }
@@ -385,7 +398,9 @@ module.exports = {
   upsertGames,
   buildBatchUpsert,
   importGames,
+  maybeGradeImported,
   defaultSeasons,
+  HISTORY_FROM_SEASON,
   UPSERT_SQL,
   SEED_PATH,
   SCHEDULE_2026_PATH

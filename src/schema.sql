@@ -1,5 +1,5 @@
 -- NFL pick-em schema (Neon Postgres). Idempotent.
--- Copied under src/ so Vercel includeFiles (src/**) ships it with the function.
+-- Default import covers 2016 through the current season; --from-2010 still works.
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
@@ -104,6 +104,21 @@ CREATE TABLE IF NOT EXISTS app_meta (
   value TEXT NOT NULL,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+CREATE TABLE IF NOT EXISTS ai_picks (
+  game_id TEXT PRIMARY KEY REFERENCES games(game_id) ON DELETE CASCADE,
+  season INT NOT NULL,
+  week INT NOT NULL,
+  home_team TEXT NOT NULL,
+  away_team TEXT NOT NULL,
+  spread_line NUMERIC,
+  total_line NUMERIC,
+  payload JSONB NOT NULL,
+  generated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS ai_picks_season_week_idx ON ai_picks (season, week);
 
 INSERT INTO pools (slug, name)
 VALUES ('default', 'Season Pick-Em')

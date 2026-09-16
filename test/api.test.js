@@ -92,6 +92,9 @@ test('/api/bootstrap returns JSON week payload', async () => {
     assert.ok(g.home && g.home.city);
     assert.ok(g.away && g.away.city);
     assert.equal(Object.prototype.hasOwnProperty.call(g.home, 'lastGame'), true);
+    assert.equal(Object.prototype.hasOwnProperty.call(g.home, 'lastFive'), true);
+    assert.equal(Object.prototype.hasOwnProperty.call(g.home, 'lastFiveAts'), true);
+    assert.equal(Object.prototype.hasOwnProperty.call(g.home, 'showRest'), true);
     assert.equal(Object.prototype.hasOwnProperty.call(g.away, 'shortRestWinPct'), true);
     assert.match(String(g.kickoffSlot || ''), /^slot-(thu|sun-1|sun-4|sun-n|mon)$/);
   }
@@ -157,13 +160,18 @@ test('/api/history supports filter query params', async () => {
 
   const html = await fetch(`http://127.0.0.1:${port}/`);
   const page = await html.text();
-  assert.match(page, /styles\.css\?v=week-ui-2/);
-  assert.match(page, /app\.js\?v=week-ui-2/);
+  assert.match(page, /styles\.css\?v=week-ui-3/);
+  assert.match(page, /app\.js\?v=week-ui-3/);
   const appJs = await fetch(`http://127.0.0.1:${port}/app.js`);
   const script = await appJs.text();
   assert.match(script, /function atsPickLabel/);
   assert.match(script, /function outrightPickLabel/);
   assert.match(script, /function ouPickLabel/);
+  assert.match(script, /function exclusivePartner/);
+  assert.match(script, /Last 5:/);
+  assert.match(script, /ATS 5:/);
+  assert.match(script, /lastGame\.label/);
+  assert.match(script, /Number\(rest\) !== 7/);
   assert.match(script, /function kickoffSlotClass/);
   assert.match(script, /pickRow\(game, 'ats', game\.away_team, game\.home_team, atsPickLabel/);
   assert.match(script, /data-sel="\$\{esc\(left\)\}"/);
@@ -191,5 +199,21 @@ test('favicon.ico is shipped', async () => {
   const res = await fetch(`http://127.0.0.1:${port}/favicon.ico`);
   assert.equal(res.status, 200);
   assert.ok((await res.arrayBuffer()).byteLength > 0);
+  server.close();
+});
+
+test('/api/ai-picks and /api/cron/scores return JSON without a database', async () => {
+  const server = await listen();
+  const { port } = server.address();
+  const ai = await fetch(`http://127.0.0.1:${port}/api/ai-picks?season=2026&week=1`);
+  const aiBody = await ai.json();
+  assert.equal(ai.status, 200);
+  assert.equal(aiBody.ok, true);
+  assert.deepEqual(aiBody.picks, []);
+  const cron = await fetch(`http://127.0.0.1:${port}/api/cron/scores`);
+  const cronBody = await cron.json();
+  assert.equal(cron.status, 503);
+  assert.equal(cronBody.ok, false);
+  assert.equal(cronBody.db, 'missing');
   server.close();
 });

@@ -2,7 +2,7 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { gradeOutright, gradeAts, gradeOu, validatePick, isLocked } = require('../src/grader');
+const { gradeOutright, gradeAts, gradeOu, validatePick, isLocked, exclusivePartner, assertExclusivePicks, atsLetter } = require('../src/grader');
 
 const game = {
   home_team: 'SEA',
@@ -60,4 +60,33 @@ test('validate markets against posted lines', () => {
   assert.equal(ou.selection, 'over');
   assert.throws(() => validatePick({ ...future, total_line: null }, 'ou', 'over'), /total/i);
   assert.throws(() => validatePick({ ...future, spread_line: null }, 'ats', 'SEA'), /spread/i);
+});
+
+test('OUTRIGHT and ATS are mutually exclusive; O/U may coexist', () => {
+  assert.equal(exclusivePartner('outright'), 'ats');
+  assert.equal(exclusivePartner('ats'), 'outright');
+  assert.equal(exclusivePartner('ou'), null);
+  assert.equal(assertExclusivePicks([
+    { game_id: 'g1', market: 'outright', selection: 'SEA' },
+    { game_id: 'g1', market: 'ou', selection: 'over' }
+  ]), true);
+  assert.throws(
+    () => assertExclusivePicks([
+      { game_id: 'g1', market: 'outright', selection: 'SEA' },
+      { game_id: 'g1', market: 'ats', selection: 'NE' }
+    ]),
+    /OUTRIGHT and ATS/
+  );
+  assert.equal(assertExclusivePicks([
+    { game_id: 'g1', market: 'outright', selection: 'SEA' },
+    { game_id: 'g1', market: 'ats', selection: '' }
+  ]), true);
+});
+
+test('atsLetter uses nflverse home-favored spread and skips to C/F', () => {
+  const g = { home_team: 'SEA', away_team: 'NE', home_score: 20, away_score: 10, spread_line: 3 };
+  assert.equal(atsLetter(g, 'SEA'), 'C');
+  assert.equal(atsLetter(g, 'NE'), 'F');
+  assert.equal(atsLetter({ ...g, home_score: 13, away_score: 10 }, 'SEA'), 'P');
+  assert.equal(atsLetter({ ...g, spread_line: null }, 'SEA'), null);
 });
