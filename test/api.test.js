@@ -88,6 +88,11 @@ test('/api/bootstrap returns JSON week payload', async () => {
     assert.ok(g.away_team);
     assert.ok(g.aiPick);
     assert.equal(Object.prototype.hasOwnProperty.call(g, 'implied'), true);
+    assert.equal(Object.prototype.hasOwnProperty.call(g, 'xPts'), true);
+    assert.ok(g.home && g.home.city);
+    assert.ok(g.away && g.away.city);
+    assert.equal(Object.prototype.hasOwnProperty.call(g.home, 'lastGame'), true);
+    assert.equal(Object.prototype.hasOwnProperty.call(g.away, 'shortRestWinPct'), true);
   }
   server.close();
 });

@@ -1,6 +1,6 @@
 'use strict';
 
-const { roadTravel, teamAbbr } = require('./teams');
+const { roadTravel, teamAbbr, teamCity } = require('./teams');
 const { toNumber, scoresReady, isLocked } = require('./grader');
 
 const SHORT_REST_DAYS = 5;
@@ -41,6 +41,18 @@ function resultLetter(team, game) {
   if (home === away) return 'T';
   const winner = home > away ? game.home_team : game.away_team;
   return winner === team ? 'W' : 'L';
+}
+
+function lastGameInfo(team, prev) {
+  if (!prev) return null;
+  const t = teamAbbr(team);
+  const letter = resultLetter(t, prev);
+  if (!letter) return null;
+  const opponent = prev.home_team === t ? prev.away_team : prev.home_team;
+  const teamScore = prev.home_team === t ? toNumber(prev.home_score) : toNumber(prev.away_score);
+  const oppScore = prev.home_team === t ? toNumber(prev.away_score) : toNumber(prev.home_score);
+  const result = letter === 'W' ? 'Win' : letter === 'L' ? 'Loss' : 'Tie';
+  return { letter, result, opponent, teamScore, oppScore };
 }
 
 function previousGame(history, team, beforeKickoff) {
@@ -171,10 +183,12 @@ function sideContext(game, side, history) {
   });
   const ctx = {
     team,
+    city: teamCity(team),
     side,
     rest,
     short,
     last,
+    lastGame: lastGameInfo(team, prev),
     homeWinPct: homePct,
     awayWinPct: awayPct,
     shortRestWinPct: short ? shortPct : null
@@ -213,6 +227,10 @@ function enrichGame(game, history, wagersByGame = {}) {
     spread_line: toNumber(game.spread_line),
     total_line: toNumber(game.total_line),
     implied,
+    xPts: {
+      away: implied.away,
+      home: implied.home
+    },
     locked,
     fadeTotal: Boolean(projection.fadeHighTotal),
     projectedOver: projection.ou === 'over',
@@ -254,5 +272,6 @@ module.exports = {
   currentSeasonWeek,
   pctLabel,
   winPct,
-  previousGame
+  previousGame,
+  lastGameInfo
 };

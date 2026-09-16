@@ -1,5 +1,40 @@
 'use strict';
 
+const TEAM_CITIES = {
+  ARI: 'Arizona',
+  ATL: 'Atlanta',
+  BAL: 'Baltimore',
+  BUF: 'Buffalo',
+  CAR: 'Carolina',
+  CHI: 'Chicago',
+  CIN: 'Cincinnati',
+  CLE: 'Cleveland',
+  DAL: 'Dallas',
+  DEN: 'Denver',
+  DET: 'Detroit',
+  GB: 'Green Bay',
+  HOU: 'Houston',
+  IND: 'Indianapolis',
+  JAX: 'Jacksonville',
+  KC: 'Kansas City',
+  LAC: 'LA Chargers',
+  LAR: 'LA Rams',
+  LV: 'Las Vegas',
+  MIA: 'Miami',
+  MIN: 'Minnesota',
+  NE: 'New England',
+  NO: 'New Orleans',
+  NYG: 'NY Giants',
+  NYJ: 'NY Jets',
+  PHI: 'Philadelphia',
+  PIT: 'Pittsburgh',
+  SEA: 'Seattle',
+  SF: 'San Francisco',
+  TB: 'Tampa Bay',
+  TEN: 'Tennessee',
+  WAS: 'Washington'
+};
+
 const TEAMS = {
   ARI: { abbr: 'ARI', tz: 'MT' },
   ATL: { abbr: 'ATL', tz: 'ET' },
@@ -83,6 +118,11 @@ function teamAbbr(code) {
   return t ? t.abbr : String(code).toUpperCase();
 }
 
+function teamCity(code) {
+  const abbr = teamAbbr(code);
+  return TEAM_CITIES[abbr] || abbr;
+}
+
 function teamTz(code) {
   const t = TEAMS[teamAbbr(code)];
   return t ? t.tz : 'ET';
@@ -127,8 +167,10 @@ function distanceBucket(awayTeam, homeTeam) {
 
 module.exports = {
   TEAMS,
+  TEAM_CITIES,
   DIVISIONS,
   teamAbbr,
+  teamCity,
   teamTz,
   tzIndex,
   roadTravel,

@@ -91,6 +91,13 @@
   const SECONDARY_HIST = new Set(['distance', 'roof', 'role', 'division', 'daysOff']);
   let loadGen = 0;
 
+  function esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
   function fmtPct(v) {
     if (v == null) return '—';
     return `${Math.round(v * 100)}%`;
@@ -100,14 +107,31 @@
     const n = Number(v);
     return Number.isInteger(n) ? String(n) : n.toFixed(1);
   }
+  function fmtInt(v) {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return '0';
+    return n.toLocaleString('en-US');
+  }
   function spreadLabel(game) {
     if (game.spread_line == null) return '—';
+    if (Number(game.spread_line) === 0) return 'PICK';
     const abs = fmtNum(Math.abs(game.spread_line));
-    return `${game.home_team} ${game.spread_line >= 0 ? '-' : '+'}${abs}`;
+    const fav = game.spread_line >= 0 ? game.home_team : game.away_team;
+    return `${fav} -${abs}`;
   }
-  function kickoffLabel(iso) {
+  function kickoffLabel(game) {
+    const iso = typeof game === 'string' ? game : game && game.kickoff;
+    const weekday = typeof game === 'object' && game && game.weekday;
     const d = new Date(iso);
-    return d.toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' });
+    const wd = weekday
+      ? String(weekday).slice(0, 3).toUpperCase()
+      : (Number.isFinite(d.getTime())
+        ? d.toLocaleString('en-US', { weekday: 'short', timeZone: 'America/New_York' }).slice(0, 3).toUpperCase()
+        : '');
+    const time = Number.isFinite(d.getTime())
+      ? d.toLocaleString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' })
+      : '';
+    return [wd, time].filter(Boolean).join(' ');
   }
   const dbBanner = document.getElementById('db-banner');
 
@@ -457,67 +481,108 @@
     return (game.wagers || []).find((w) => w.market === market);
   }
 
-  function sideBits(side, isHome) {
-    const bits = [];
-    if (side.last) bits.push(`last ${side.last}`);
+  function lastGameLabel(side) {
+    if (side.lastGame && side.lastGame.result) return side.lastGame.result;
+    if (side.last === 'W') return 'Win';
+    if (side.last === 'L') return 'Loss';
+    if (side.last === 'T') return 'Tie';
+    return null;
+  }
+
+  function sideStats(side, isHome) {
+    if (!side) return '';
+    const rows = [];
+    const last = lastGameLabel(side);
+    if (last) {
+      const detail = side.lastGame && side.lastGame.opponent != null
+        ? ` title="vs ${esc(side.lastGame.opponent)} ${side.lastGame.teamScore}-${side.lastGame.oppScore}"`
+        : '';
+      rows.push(`<div class="side-stat muted"${detail}>Last Game: ${esc(last)}</div>`);
+    }
     if (side.rest != null) {
-      bits.push(`rest ${side.rest}d${side.short ? ' SHORT' : ''}`);
+      const shortBit = side.short ? ' SHORT' : '';
+      rows.push(`<div class="side-stat${side.short ? ' alert' : ' muted'}">Rest Days: ${esc(side.rest)}${shortBit}</div>`);
     }
-    if (side.short && side.shortRestWinPct != null) bits.push(`short ${fmtPct(side.shortRestWinPct)}`);
-    if (isHome && side.homeWinPct != null) bits.push(`home ${fmtPct(side.homeWinPct)}`);
-    if (!isHome && side.awayWinPct != null) bits.push(`away ${fmtPct(side.awayWinPct)}`);
-    if (side.travel) {
-      bits.push(`${side.travel.label}${side.travel.winPct != null ? ` ${fmtPct(side.travel.winPct)}` : ''}`);
+    if (side.short && side.shortRestWinPct != null) {
+      rows.push(`<div class="side-stat alert">Win% ${fmtPct(side.shortRestWinPct)} on Short Rest</div>`);
     }
-    return bits.map((b) => `<div class="stat${/SHORT|short /.test(b) ? ' short' : ''}">${b}</div>`).join('');
+    if (isHome && side.homeWinPct != null) {
+      rows.push(`<div class="side-stat muted">Home Win%: ${fmtPct(side.homeWinPct)}</div>`);
+    }
+    if (!isHome && side.awayWinPct != null) {
+      rows.push(`<div class="side-stat muted">away Win%: ${fmtPct(side.awayWinPct)}</div>`);
+    }
+    return rows.join('');
   }
 
   function pickRow(game, market, left, right) {
+    const labels = { outright: 'OUTRIGHT', ats: 'ATS', ou: 'OU' };
     const current = wagerFor(game, market);
     const locked = game.locked;
     const on = (val) => current && String(current.selection).toUpperCase() === String(val).toUpperCase();
     return `<div class="pick">
-      <label>${market}</label>
-      <button type="button" data-gid="${game.game_id}" data-market="${market}" data-sel="${left}" class="${on(left) ? 'on' : ''}" ${locked ? 'disabled' : ''} title="${locked ? 'Locked at kickoff' : `Pick ${left} ${market}`}">${left}</button>
-      <button type="button" data-gid="${game.game_id}" data-market="${market}" data-sel="${right}" class="${on(right) ? 'on' : ''}" ${locked ? 'disabled' : ''} title="${locked ? 'Locked at kickoff' : `Pick ${right} ${market}`}">${right}</button>
+      <label>${labels[market] || market}</label>
+      <button type="button" data-gid="${esc(game.game_id)}" data-market="${market}" data-sel="${esc(left)}" class="${on(left) ? 'on' : ''}" ${locked ? 'disabled' : ''} title="${locked ? 'Locked at kickoff' : `Pick ${left} ${market}`}">${esc(left)}</button>
+      <button type="button" data-gid="${esc(game.game_id)}" data-market="${market}" data-sel="${esc(right)}" class="${on(right) ? 'on' : ''}" ${locked ? 'disabled' : ''} title="${locked ? 'Locked at kickoff' : `Pick ${right} ${market}`}">${esc(right)}</button>
     </div>`;
   }
 
+  function xPtsValue(game, side) {
+    if (game.xPts && game.xPts[side] != null) return game.xPts[side];
+    return game.implied && game.implied[side];
+  }
+
   function card(game) {
-    const ai = game.aiPick && game.aiPick.label ? game.aiPick.label.replace('AI Pick:', '').trim() : '—';
-    return `<article class="card${game.locked ? ' locked' : ''}">
-      <div class="meta">
-        <span>${kickoffLabel(game.kickoff)}</span>
-        <span class="${game.locked ? 'lock' : ''}">${game.locked ? 'locked' : 'open'}</span>
+    const aiRaw = game.aiPick && game.aiPick.label ? game.aiPick.label.replace(/^AI Pick:\s*/i, '').trim() : '';
+    const awayCity = (game.away && game.away.city) || game.away_team;
+    const homeCity = (game.home && game.home.city) || game.home_team;
+    const xAway = xPtsValue(game, 'away');
+    const xHome = xPtsValue(game, 'home');
+    return `<article class="card matchup${game.locked ? ' locked' : ''}">
+      <div class="card-head">
+        <span class="kick">${esc(kickoffLabel(game))}</span>
+        <span class="status${game.locked ? ' lock' : ''}">${game.locked ? 'LOCKED' : 'OPEN'}</span>
       </div>
       <div class="sides">
         <div class="team">
-          <div class="abbr">${game.away_team}</div>
+          <div class="city">${esc(awayCity)}</div>
           <div class="role">AWAY</div>
-          ${sideBits(game.away, false)}
+          <div class="side-stats">${sideStats(game.away, false)}</div>
         </div>
         <div class="vs">@</div>
         <div class="team home">
-          <div class="abbr">${game.home_team}</div>
+          <div class="city">${esc(homeCity)}</div>
           <div class="role">HOME</div>
-          ${sideBits(game.home, true)}
+          <div class="side-stats">${sideStats(game.home, true)}</div>
         </div>
       </div>
       <div class="lines">
-        <div>spread <b>${spreadLabel(game)}</b></div>
-        <div class="total${game.fadeTotal ? ' fade' : ''}">total <b>${fmtNum(game.total_line)}</b></div>
+        <div><span class="k">spread</span> <b>${esc(spreadLabel(game))}</b></div>
+        <div class="total${game.fadeTotal ? ' fade' : ''}"><span class="k">total</span> <b>O/U ${fmtNum(game.total_line)}</b></div>
       </div>
-      <div class="lines">
-        <div>imp ${game.away_team} <b>${fmtNum(game.implied && game.implied.away)}</b></div>
-        <div>imp ${game.home_team} <b>${fmtNum(game.implied && game.implied.home)}</b></div>
+      <div class="lines xpts">
+        <div><span class="k">xPts</span> <b>${esc(game.away_team)} ${fmtNum(xAway)}</b></div>
+        <div><span class="k">xPts</span> <b>${esc(game.home_team)} ${fmtNum(xHome)}</b></div>
       </div>
-      <div class="ai"><span>AI Pick:</span> ${ai}</div>
+      ${aiRaw ? `<div class="ai"><span>AI Pick:</span> ${esc(aiRaw)}</div>` : ''}
       <div class="picks">
         ${pickRow(game, 'outright', game.away_team, game.home_team)}
         ${pickRow(game, 'ats', game.away_team, game.home_team)}
         ${pickRow(game, 'ou', 'over', 'under')}
       </div>
     </article>`;
+  }
+
+  function myWeekStrip(games) {
+    const me = state.bootstrap && state.bootstrap.user && state.bootstrap.user.username;
+    const rows = (state.standings && state.standings.standings) || (state.bootstrap && state.bootstrap.standings) || [];
+    const row = me ? rows.find((r) => r.username === me) : null;
+    const locks = (games || []).filter((g) => !g.locked && (g.wagers || []).length).length;
+    return {
+      season: row ? row.season_points : 0,
+      week: row ? row.weekly_points : 0,
+      locks
+    };
   }
 
   async function onPick(e) {
@@ -561,17 +626,22 @@
   function weekView() {
     const w = state.week || state.bootstrap;
     const games = (w.games || []).filter(passFilters);
-    return `<section>
-      <div class="weekbar">
-        <h1>Current Week ${w.week}</h1>
-        <span class="lede">${w.season}</span>
+    const strip = myWeekStrip(w.games || []);
+    return `<section class="week-page">
+      <div class="week-hero">
+        <div class="week-pill">WEEK ${esc(w.week)}</div>
+      </div>
+      <div class="week-stats">
+        <div>Season pts <strong class="gold">${fmtInt(strip.season)}</strong></div>
+        <div>This week <strong>${fmtInt(strip.week)}</strong></div>
+        <div>Locks at kickoff <strong>${fmtInt(strip.locks)}</strong></div>
       </div>
       <div class="filters">
         <button type="button" class="chip${state.filters.homeDog ? ' on' : ''}" data-filter="homeDog" title="Show home underdogs only">Home underdogs</button>
         <button type="button" class="chip${state.filters.projOver ? ' on' : ''}" data-filter="projOver" title="Show games projected over the total">Projected over</button>
         <button type="button" class="chip${state.filters.projUnder ? ' on' : ''}" data-filter="projUnder" title="Show games projected under the total">Projected under</button>
       </div>
-      <div class="cards" id="week-cards">${games.map(card).join('') || '<p>No games match those filters.</p>'}</div>
+      <div class="cards week-cards" id="week-cards">${games.map(card).join('') || '<p>No games match those filters.</p>'}</div>
     </section>`;
   }
 

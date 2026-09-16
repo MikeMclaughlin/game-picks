@@ -2,8 +2,8 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { impliedPoints, projectGame, formatAtsPick, currentSeasonWeek } = require('../src/week-view');
-const { roadTravel } = require('../src/teams');
+const { impliedPoints, projectGame, formatAtsPick, currentSeasonWeek, enrichGame, lastGameInfo } = require('../src/week-view');
+const { roadTravel, teamCity } = require('../src/teams');
 const { UPSERT_SQL } = require('../src/nfl-data');
 
 test('implied points from (total ± spread) / 2', () => {
@@ -50,4 +50,78 @@ test('current week prefers upcoming kickoff', () => {
   ];
   const cur = currentSeasonWeek(games, new Date('2026-09-16T12:00:00Z'));
   assert.deepEqual(cur, { season: 2026, week: 2 });
+});
+
+test('teamCity uses market names for two-city clubs', () => {
+  assert.equal(teamCity('DET'), 'Detroit');
+  assert.equal(teamCity('NYG'), 'NY Giants');
+  assert.equal(teamCity('LA'), 'LA Rams');
+});
+
+test('lastGameInfo reports Win/Loss plus opponent and scores', () => {
+  const prev = {
+    home_team: 'DET',
+    away_team: 'TB',
+    home_score: 27,
+    away_score: 20
+  };
+  const info = lastGameInfo('DET', prev);
+  assert.equal(info.result, 'Win');
+  assert.equal(info.letter, 'W');
+  assert.equal(info.opponent, 'TB');
+  assert.equal(info.teamScore, 27);
+  assert.equal(info.oppScore, 20);
+});
+
+test('enrichGame exposes lastGame, city, short rest, and xPts from the line', () => {
+  const prevDet = {
+    game_id: '2026_01_TB_DET',
+    home_team: 'DET',
+    away_team: 'TB',
+    home_score: 27,
+    away_score: 20,
+    kickoff: '2026-09-13T17:00:00-04:00',
+    home_rest: 7,
+    away_rest: 7,
+    location: 'Home'
+  };
+  const prevBuf = {
+    game_id: '2026_01_BUF_HOU',
+    home_team: 'HOU',
+    away_team: 'BUF',
+    home_score: 31,
+    away_score: 20,
+    kickoff: '2026-09-13T17:00:00-04:00',
+    home_rest: 7,
+    away_rest: 7,
+    location: 'Home'
+  };
+  const game = {
+    game_id: '2026_02_DET_BUF',
+    season: 2026,
+    week: 2,
+    game_type: 'REG',
+    kickoff: '2026-09-17T20:15:00-04:00',
+    weekday: 'Thursday',
+    home_team: 'BUF',
+    away_team: 'DET',
+    spread_line: 5.5,
+    total_line: 54.5,
+    home_rest: 4,
+    away_rest: 4,
+    home_score: null,
+    away_score: null
+  };
+  const card = enrichGame(game, [prevDet, prevBuf]);
+  assert.equal(card.away.city, 'Detroit');
+  assert.equal(card.home.city, 'Buffalo');
+  assert.equal(card.away.lastGame.result, 'Win');
+  assert.equal(card.home.lastGame.result, 'Loss');
+  assert.equal(card.away.short, true);
+  assert.equal(card.home.short, true);
+  assert.equal(card.implied.away, 24.5);
+  assert.equal(card.implied.home, 30);
+  assert.equal(card.xPts.away, 24.5);
+  assert.equal(card.xPts.home, 30);
+  assert.equal(card.home.shortRestWinPct, null);
 });
