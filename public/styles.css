@@ -33,10 +33,17 @@ button, input, select { font: inherit; color: inherit; }
 }
 .tabs button.on, .chip.on, .pick button.on { background: var(--lime); color: #111; border-color: var(--lime); font-weight: 700; }
 .login { display: flex; gap: 6px; align-items: center; margin-left: auto; }
-.login input {
-  width: 140px; background: #0b0f14; border: 1px solid var(--line); padding: 5px 8px; border-radius: 4px;
+.login input, select {
+  background: #0b0f14; border: 1px solid var(--line); padding: 5px 8px; border-radius: 4px;
 }
+.login input { width: 140px; }
+select { min-width: 88px; }
 .who { color: var(--lime); font-weight: 700; }
+.db-banner {
+  margin: 0; padding: 7px 12px; background: #2a1f0c; color: var(--amber);
+  border-bottom: 1px solid #5a4318; font-size: 12px;
+}
+.db-banner[hidden] { display: none; }
 main { padding: 12px; max-width: 1280px; margin: 0 auto; }
 h1, h2 { margin: 0 0 8px; font-size: 16px; font-weight: 700; letter-spacing: 0.02em; }
 .lede { color: var(--muted); margin: 0 0 12px; }

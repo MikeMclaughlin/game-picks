@@ -4,7 +4,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const { ensureSchema } = require('./schema');
-const { hasDatabase, getSql, ping } = require('./db');
+const { hasDatabase, getSql, ping, missingDbPayload } = require('./db');
 const {
   json,
   readBody,
@@ -39,20 +39,64 @@ const MIME = {
 let seedPromise = null;
 
 async function withDb() {
-  if (!hasDatabase()) return { sql: null, db: false };
-  const sql = getSql();
-  await ensureSchema(sql);
-  return { sql, db: true };
+  if (!hasDatabase()) return { sql: null, db: false, status: 'missing' };
+  try {
+    const sql = getSql();
+    if (!sql) return { sql: null, db: false, status: 'error', error: 'Failed to initialize database client' };
+    await ensureSchema(sql);
+    return { sql, db: true, status: 'ok' };
+  } catch (err) {
+    console.error('database init failed', err);
+    return { sql: null, db: false, status: 'error', error: err.message };
+  }
+}
+
+function dbUnavailable(res, dbState) {
+  const extra = dbState && dbState.status === 'error' && dbState.error
+    ? { error: `Database unavailable: ${dbState.error}`, db: 'error' }
+    : {};
+  return json(res, 503, missingDbPayload(extra));
 }
 
 async function seedIfNeeded(sql) {
   if (!sql) return { seeded: false };
   if (seedPromise) return seedPromise;
   seedPromise = (async () => {
-    const [{ count }] = await sql`SELECT COUNT(*)::int AS count FROM games`;
-    if (count > 0) return { seeded: false, count };
-    const result = await importGames(sql, { seasons: defaultSeasons(), seedOnly: false });
-    return { seeded: true, ...result };
+    const seasons = defaultSeasons();
+    let counts = [];
+    try {
+      counts = await sql`SELECT season, COUNT(*)::int AS n FROM games GROUP BY season`;
+    } catch {
+      counts = [];
+    }
+    const bySeason = {};
+    for (const row of counts) bySeason[Number(row.season)] = Number(row.n);
+    const missing = seasons.filter((s) => !bySeason[s] || bySeason[s] < 200);
+    if (!missing.length) {
+      try {
+        const meta = await sql`SELECT updated_at FROM app_meta WHERE key = 'last_import'`;
+        const stale = !meta[0] || Date.now() - new Date(meta[0].updated_at).getTime() > 15 * 60 * 1000;
+        if (stale) {
+          const current = seasons[seasons.length - 1];
+          const refreshed = await importGames(sql, {
+            seasons: [current],
+            preferBundled: false,
+            remoteTimeoutMs: 5000
+          });
+          return { seeded: false, refreshed: true, bySeason, seasons, ...refreshed };
+        }
+      } catch (err) {
+        return { seeded: false, bySeason, seasons, refreshError: err.message };
+      }
+      return { seeded: false, bySeason, seasons };
+    }
+    const result = await importGames(sql, {
+      seasons,
+      preferBundled: true,
+      seedOnly: false,
+      remoteTimeoutMs: 6000
+    });
+    return { seeded: true, missing, bySeason, ...result };
   })();
   try {
     return await seedPromise;
@@ -66,10 +110,11 @@ function sendFile(res, filePath) {
   const ext = path.extname(filePath).toLowerCase();
   const type = MIME[ext] || 'application/octet-stream';
   const body = fs.readFileSync(filePath);
+  const noStore = ext === '.html' || ext === '.js' || ext === '.css';
   res.writeHead(200, {
     'content-type': type,
     'content-length': body.length,
-    'cache-control': ext === '.html' ? 'no-store' : 'public, max-age=3600'
+    'cache-control': noStore ? 'no-store' : 'public, max-age=3600'
   });
   res.end(body);
 }
@@ -186,37 +231,48 @@ function groupWagers(list) {
 }
 
 async function handleApi(req, res, url) {
-  const { sql, db } = await withDb();
   const pathname = url.pathname.replace(/\/+$/, '') || '/';
   const method = req.method || 'GET';
 
   if (pathname === '/api/health' && method === 'GET') {
-    const dbPing = db ? await ping() : { ok: false, reason: 'DATABASE_URL is not set' };
-    return json(res, 200, {
-      ok: true,
-      service: 'game-picks',
-      db: Boolean(dbPing.ok),
-      database: dbPing.ok ? 'ok' : dbPing.reason,
-      time: new Date().toISOString()
-    });
+    if (!hasDatabase()) {
+      return json(res, 200, {
+        ok: true,
+        service: 'game-picks',
+        db: 'missing',
+        time: new Date().toISOString()
+      });
+    }
+    try {
+      const dbPing = await ping();
+      return json(res, 200, {
+        ok: true,
+        service: 'game-picks',
+        db: dbPing.ok ? 'ok' : 'error',
+        database: dbPing.ok ? 'ok' : dbPing.reason,
+        time: new Date().toISOString()
+      });
+    } catch (err) {
+      return json(res, 200, {
+        ok: true,
+        service: 'game-picks',
+        db: 'error',
+        database: err.message,
+        time: new Date().toISOString()
+      });
+    }
   }
 
+  const { sql, db, status, error } = await withDb();
+  const dbState = { sql, db, status, error };
+
   if (pathname === '/api/bootstrap' && method === 'GET') {
+    let seed = null;
     if (sql) {
       try {
-        await seedIfNeeded(sql);
+        seed = await seedIfNeeded(sql);
       } catch (err) {
-        return json(res, 200, {
-          ok: true,
-          db: true,
-          warning: `Seed/import failed: ${err.message}`,
-          user: null,
-          season: defaultSeasons().at(-1),
-          week: 1,
-          games: [],
-          standings: [],
-          teams: listTeamAbbrs()
-        });
+        seed = { ok: false, error: err.message };
       }
     }
     const user = await currentUser(sql, req);
@@ -233,6 +289,9 @@ async function handleApi(req, res, url) {
     return json(res, 200, {
       ok: true,
       db,
+      dbStatus: status || (db ? 'ok' : 'missing'),
+      dbError: error || null,
+      seed,
       user: user ? { id: user.id, username: user.username, pool: user.pool_slug } : null,
       season,
       week,
@@ -244,7 +303,7 @@ async function handleApi(req, res, url) {
   }
 
   if (pathname === '/api/login' && method === 'POST') {
-    if (!sql) return json(res, 503, { ok: false, error: 'DATABASE_URL is not set' });
+    if (!sql) return dbUnavailable(res, dbState);
     const body = await readBody(req);
     const { display, norm } = assertUsername(body.username);
     const pool = await getPool(sql, body.pool || url.searchParams.get('pool'));
@@ -294,7 +353,7 @@ async function handleApi(req, res, url) {
   }
 
   if (pathname === '/api/picks' && method === 'POST') {
-    if (!sql) return json(res, 503, { ok: false, error: 'DATABASE_URL is not set' });
+    if (!sql) return dbUnavailable(res, dbState);
     const user = await currentUser(sql, req);
     if (!user) return json(res, 401, { ok: false, error: 'Sign in with a username first' });
     const body = await readBody(req);
@@ -365,14 +424,14 @@ async function handleApi(req, res, url) {
 
   if (pathname === '/api/grade-all' && (method === 'GET' || method === 'POST')) {
     requireAdmin(req, url);
-    if (!sql) return json(res, 503, { ok: false, error: 'DATABASE_URL is not set' });
+    if (!sql) return dbUnavailable(res, dbState);
     const result = await gradeAll(sql);
     return json(res, 200, result);
   }
 
   if (pathname === '/api/import' && (method === 'GET' || method === 'POST')) {
     requireAdmin(req, url);
-    if (!sql) return json(res, 503, { ok: false, error: 'DATABASE_URL is not set' });
+    if (!sql) return dbUnavailable(res, dbState);
     const seasonsParam = url.searchParams.get('seasons');
     const seasons = seasonsParam
       ? seasonsParam.split(',').map((s) => Number(s.trim())).filter(Boolean)
@@ -410,12 +469,26 @@ async function handler(req, res) {
   } catch (err) {
     const status = err.statusCode || 500;
     if (status >= 500) console.error(err);
-    json(res, status, { ok: false, error: err.message || 'Server error' });
+    try {
+      json(res, status, { ok: false, error: err.message || 'Server error' });
+    } catch (sendErr) {
+      console.error(sendErr);
+      if (!res.headersSent) res.writeHead(status).end();
+    }
   }
 }
 
 const server = http.createServer((req, res) => {
-  handler(req, res);
+  Promise.resolve(handler(req, res)).catch((err) => {
+    console.error(err);
+    if (!res.headersSent) {
+      try {
+        json(res, 500, { ok: false, error: err.message || 'Server error' });
+      } catch {
+        res.writeHead(500).end();
+      }
+    }
+  });
 });
 
 function shouldListen() {

@@ -21,7 +21,38 @@ test('/api/health returns JSON', async () => {
   const body = await res.json();
   assert.equal(res.status, 200);
   assert.equal(body.ok, true);
-  assert.equal(typeof body.database, 'string');
+  assert.equal(body.db, 'missing');
+  server.close();
+});
+
+test('/api/login without DATABASE_URL returns JSON 503', async () => {
+  const server = await listen();
+  const { port } = server.address();
+  const res = await fetch(`http://127.0.0.1:${port}/api/login`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ username: 'TestUser' })
+  });
+  const body = await res.json();
+  assert.equal(res.status, 503);
+  assert.equal(body.ok, false);
+  assert.equal(body.db, 'missing');
+  assert.match(body.error, /DATABASE_URL/);
+  server.close();
+});
+
+test('/api/picks without DATABASE_URL returns JSON 503', async () => {
+  const server = await listen();
+  const { port } = server.address();
+  const res = await fetch(`http://127.0.0.1:${port}/api/picks`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ game_id: 'x', market: 'outright', selection: 'SEA' })
+  });
+  const body = await res.json();
+  assert.equal(res.status, 503);
+  assert.equal(body.ok, false);
+  assert.equal(body.db, 'missing');
   server.close();
 });
 

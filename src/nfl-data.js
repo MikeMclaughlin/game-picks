@@ -4,9 +4,19 @@ const fs = require('fs');
 const path = require('path');
 const { teamAbbr } = require('./teams');
 
-const ROOT = path.join(__dirname, '..');
-const SEED_PATH = path.join(ROOT, 'data', 'games-seed.json');
-const SCHEDULE_2026_PATH = path.join(ROOT, 'data', 'schedule-2026.json');
+const { execSql } = require('./schema');
+
+function resolveDataFile(...rel) {
+  const candidates = [
+    path.join(__dirname, '..', ...rel),
+    path.join(process.cwd(), ...rel),
+    path.join(__dirname, ...rel)
+  ];
+  return candidates.find((p) => fs.existsSync(p)) || candidates[0];
+}
+
+const SEED_PATH = resolveDataFile('data', 'games-seed.json');
+const SCHEDULE_2026_PATH = resolveDataFile('data', 'schedule-2026.json');
 
 const REMOTE_SOURCES = [
   (season) => `https://www.nfldata.org/v1/games?season=${season}`,
@@ -139,20 +149,27 @@ function loadSchedule2026() {
   return (parsed.games || parsed).map(normalizeGame).filter(Boolean);
 }
 
-async function fetchText(url) {
-  const res = await fetch(url, {
-    headers: {
-      'user-agent': 'game-picks/1.0 (pick-em; +https://github.com/MikeMclaughlin/game-picks)',
-      accept: 'application/json,text/csv,text/plain,*/*'
-    },
-    cache: 'no-store'
-  });
-  if (!res.ok) {
-    const err = new Error(`Fetch ${url} failed: ${res.status}`);
-    err.status = res.status;
-    throw err;
+async function fetchText(url, timeoutMs = 8000) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      headers: {
+        'user-agent': 'game-picks/1.0 (pick-em; +https://github.com/MikeMclaughlin/game-picks)',
+        accept: 'application/json,text/csv,text/plain,*/*'
+      },
+      cache: 'no-store',
+      signal: ctrl.signal
+    });
+    if (!res.ok) {
+      const err = new Error(`Fetch ${url} failed: ${res.status}`);
+      err.status = res.status;
+      throw err;
+    }
+    return res.text();
+  } finally {
+    clearTimeout(timer);
   }
-  return res.text();
 }
 
 function coerceRemote(text) {
@@ -169,7 +186,7 @@ function coerceRemote(text) {
   return [];
 }
 
-async function fetchRemoteGames(seasons) {
+async function fetchRemoteGames(seasons, timeoutMs = 8000) {
   const wanted = new Set((seasons || []).map(Number));
   const errors = [];
   for (const makeUrl of REMOTE_SOURCES) {
@@ -177,14 +194,14 @@ async function fetchRemoteGames(seasons) {
       if (makeUrl.length === 1 && wanted.size) {
         const collected = [];
         for (const season of wanted) {
-          const text = await fetchText(makeUrl(season));
+          const text = await fetchText(makeUrl(season), Math.min(timeoutMs, 2500));
           collected.push(...coerceRemote(text));
         }
         if (collected.length) {
           return { games: filterSeasons(collected, wanted), source: makeUrl([...wanted][0]) };
         }
       } else {
-        const text = await fetchText(makeUrl());
+        const text = await fetchText(makeUrl(), timeoutMs);
         const games = coerceRemote(text);
         if (games.length) {
           return { games: filterSeasons(games, wanted), source: makeUrl() };
@@ -202,14 +219,13 @@ function filterSeasons(games, wanted) {
   return games.filter((g) => wanted.has(Number(g.season)));
 }
 
-const UPSERT_SQL = `
-INSERT INTO games (
-  game_id, season, week, game_type, kickoff, gameday, weekday, gametime,
-  home_team, away_team, home_score, away_score, spread_line, total_line,
-  home_rest, away_rest, roof, surface, temp, wind, location, overtime, updated_at
-) VALUES (
-  $1,$2,$3,$4,$5::timestamptz,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22, now()
-)
+const GAME_COLUMNS = [
+  'game_id', 'season', 'week', 'game_type', 'kickoff', 'gameday', 'weekday', 'gametime',
+  'home_team', 'away_team', 'home_score', 'away_score', 'spread_line', 'total_line',
+  'home_rest', 'away_rest', 'roof', 'surface', 'temp', 'wind', 'location', 'overtime'
+];
+
+const UPSERT_CONFLICT = `
 ON CONFLICT (game_id) DO UPDATE SET
   season = EXCLUDED.season,
   week = EXCLUDED.week,
@@ -235,34 +251,60 @@ ON CONFLICT (game_id) DO UPDATE SET
   updated_at = now()
 `;
 
-async function upsertGames(sql, games) {
+const UPSERT_SQL = `
+INSERT INTO games (
+  ${GAME_COLUMNS.join(', ')}, updated_at
+) VALUES (
+  $1,$2,$3,$4,$5::timestamptz,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22, now()
+)
+${UPSERT_CONFLICT}
+`;
+
+function gameParams(g) {
+  return [
+    g.game_id,
+    g.season,
+    g.week,
+    g.game_type,
+    g.kickoff,
+    g.gameday,
+    g.weekday,
+    g.gametime,
+    g.home_team,
+    g.away_team,
+    g.home_score,
+    g.away_score,
+    g.spread_line,
+    g.total_line,
+    g.home_rest,
+    g.away_rest,
+    g.roof,
+    g.surface,
+    g.temp,
+    g.wind,
+    g.location,
+    g.overtime
+  ];
+}
+
+function buildBatchUpsert(batch) {
+  const cols = 22;
+  const placeholders = batch.map((_, i) => {
+    const b = i * cols;
+    return `($${b + 1},$${b + 2},$${b + 3},$${b + 4},$${b + 5}::timestamptz,$${b + 6},$${b + 7},$${b + 8},$${b + 9},$${b + 10},$${b + 11},$${b + 12},$${b + 13},$${b + 14},$${b + 15},$${b + 16},$${b + 17},$${b + 18},$${b + 19},$${b + 20},$${b + 21},$${b + 22}, now())`;
+  }).join(',');
+  const text = `INSERT INTO games (${GAME_COLUMNS.join(', ')}, updated_at) VALUES ${placeholders} ${UPSERT_CONFLICT}`;
+  const params = batch.flatMap(gameParams);
+  return { text, params };
+}
+
+async function upsertGames(sql, games, batchSize = 80) {
   let upserted = 0;
-  for (const g of games) {
-    await sql.query(UPSERT_SQL, [
-      g.game_id,
-      g.season,
-      g.week,
-      g.game_type,
-      g.kickoff,
-      g.gameday,
-      g.weekday,
-      g.gametime,
-      g.home_team,
-      g.away_team,
-      g.home_score,
-      g.away_score,
-      g.spread_line,
-      g.total_line,
-      g.home_rest,
-      g.away_rest,
-      g.roof,
-      g.surface,
-      g.temp,
-      g.wind,
-      g.location,
-      g.overtime
-    ]);
-    upserted += 1;
+  for (let i = 0; i < games.length; i += batchSize) {
+    const batch = games.slice(i, i + batchSize);
+    const { text, params } = buildBatchUpsert(batch);
+    await execSql(sql, text, params);
+    upserted += batch.length;
   }
   return upserted;
 }
@@ -279,15 +321,32 @@ async function importGames(sql, options = {}) {
     ? options.seasons
     : defaultSeasons()
   ).map(Number);
+  const preferBundled = options.preferBundled === true || options.seedOnly === true;
+  const remoteTimeoutMs = options.remoteTimeoutMs || 8000;
   let source = 'seed';
   let games = [];
+  let remote = { games: [], source: null, errors: [] };
+
+  if (preferBundled) {
+    games = filterSeasons(loadSeedGames(), new Set(seasons));
+    source = 'bundled-seed';
+  }
+
   if (!options.seedOnly) {
-    const remote = await fetchRemoteGames(seasons);
+    remote = await fetchRemoteGames(seasons, remoteTimeoutMs);
     if (remote.games.length) {
-      games = remote.games;
-      source = remote.source;
+      if (!games.length) {
+        games = remote.games;
+        source = remote.source;
+      } else {
+        const byId = new Map(games.map((g) => [g.game_id, g]));
+        for (const g of remote.games) byId.set(g.game_id, { ...byId.get(g.game_id), ...g });
+        games = [...byId.values()];
+        source = `${source}+${remote.source}`;
+      }
     }
   }
+
   if (!games.length) {
     games = filterSeasons(loadSeedGames(), new Set(seasons));
     source = 'bundled-seed';
@@ -305,7 +364,15 @@ async function importGames(sql, options = {}) {
       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()
     `;
   }
-  return { ok: true, source, seasons, fetched: games.length, upserted, games: sql ? undefined : games };
+  return {
+    ok: true,
+    source,
+    seasons,
+    fetched: games.length,
+    upserted,
+    remoteErrors: remote.errors,
+    games: sql ? undefined : games
+  };
 }
 
 module.exports = {
@@ -316,6 +383,7 @@ module.exports = {
   loadSchedule2026,
   fetchRemoteGames,
   upsertGames,
+  buildBatchUpsert,
   importGames,
   defaultSeasons,
   UPSERT_SQL,
