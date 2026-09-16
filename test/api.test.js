@@ -156,8 +156,15 @@ test('/api/history supports filter query params', async () => {
 
   const html = await fetch(`http://127.0.0.1:${port}/`);
   const page = await html.text();
-  assert.match(page, /styles\.css\?v=/);
-  assert.match(page, /app\.js\?v=/);
+  assert.match(page, /styles\.css\?v=ats-spread-1/);
+  assert.match(page, /app\.js\?v=ats-spread-1/);
+  const appJs = await fetch(`http://127.0.0.1:${port}/app.js`);
+  const script = await appJs.text();
+  assert.match(script, /function atsPickLabel/);
+  assert.match(script, /pickRow\(game, 'ats', game\.away_team, game\.home_team, atsPickLabel/);
+  assert.match(script, /data-sel="\$\{esc\(left\)\}"/);
+  assert.match(script, /pickRow\(game, 'outright', game\.away_team, game\.home_team\)/);
+  assert.doesNotMatch(script, /pickRow\(game, 'outright'[^)]*atsPickLabel/);
   assert.match(page, /clerk-user-button/);
   assert.match(page, /btn-sign-in/);
   assert.match(page, /Auth not configured/);

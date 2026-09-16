@@ -110,6 +110,11 @@ h1, h2 { margin: 0 0 8px; font-size: 22px; font-weight: 700; letter-spacing: 0.0
 .picks { display: grid; gap: 5px; }
 .pick { display: grid; grid-template-columns: 72px 1fr 1fr; gap: 6px; align-items: center; }
 .pick label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
+.pick button {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+}
 .pick button:disabled { opacity: 0.55; cursor: not-allowed; }
 .pick button:not(:disabled):hover { border-color: var(--gold); }
 .filters { display: flex; gap: 6px; flex-wrap: wrap; margin: 0 0 10px; }
