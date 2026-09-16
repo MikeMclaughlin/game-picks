@@ -30,7 +30,7 @@ test('missing Clerk keys are not configured', () => {
   const cfg = publicClerkConfig(env);
   assert.equal(cfg.configured, false);
   assert.equal(cfg.publishableKey, null);
-  assert.deepEqual(cfg.providers, ['google', 'apple', 'x']);
+  assert.deepEqual(cfg.providers, ['google', 'x']);
   const body = authNotConfiguredPayload();
   assert.equal(body.ok, false);
   assert.equal(body.auth, 'missing');

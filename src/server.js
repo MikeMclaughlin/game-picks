@@ -208,7 +208,7 @@ function signInRequired(res) {
   return json(res, 401, {
     ok: false,
     error: isClerkConfigured()
-      ? 'Sign in with Google, Apple, or X to continue'
+      ? 'Sign in with Google or X to continue'
       : 'Auth not configured'
   });
 }

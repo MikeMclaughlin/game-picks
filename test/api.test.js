@@ -52,7 +52,7 @@ test('/api/auth/config is public and omits secrets', async () => {
   assert.equal(body.configured, false);
   assert.equal(body.publishableKey, null);
   assert.equal(Object.prototype.hasOwnProperty.call(body, 'secretKey'), false);
-  assert.deepEqual(body.providers, ['google', 'apple', 'x']);
+  assert.deepEqual(body.providers, ['google', 'x']);
   server.close();
 });
 
@@ -93,6 +93,7 @@ test('/api/bootstrap returns JSON week payload', async () => {
     assert.ok(g.away && g.away.city);
     assert.equal(Object.prototype.hasOwnProperty.call(g.home, 'lastGame'), true);
     assert.equal(Object.prototype.hasOwnProperty.call(g.away, 'shortRestWinPct'), true);
+    assert.match(String(g.kickoffSlot || ''), /^slot-(thu|sun-1|sun-4|sun-n|mon)$/);
   }
   server.close();
 });
@@ -156,15 +157,24 @@ test('/api/history supports filter query params', async () => {
 
   const html = await fetch(`http://127.0.0.1:${port}/`);
   const page = await html.text();
-  assert.match(page, /styles\.css\?v=ats-spread-1/);
-  assert.match(page, /app\.js\?v=ats-spread-1/);
+  assert.match(page, /styles\.css\?v=week-ui-2/);
+  assert.match(page, /app\.js\?v=week-ui-2/);
   const appJs = await fetch(`http://127.0.0.1:${port}/app.js`);
   const script = await appJs.text();
   assert.match(script, /function atsPickLabel/);
+  assert.match(script, /function outrightPickLabel/);
+  assert.match(script, /function ouPickLabel/);
+  assert.match(script, /function kickoffSlotClass/);
   assert.match(script, /pickRow\(game, 'ats', game\.away_team, game\.home_team, atsPickLabel/);
   assert.match(script, /data-sel="\$\{esc\(left\)\}"/);
-  assert.match(script, /pickRow\(game, 'outright', game\.away_team, game\.home_team\)/);
-  assert.doesNotMatch(script, /pickRow\(game, 'outright'[^)]*atsPickLabel/);
+  assert.match(script, /outrightPickLabel\(game\.away_team\)/);
+  assert.match(script, /ouPickLabel\(game, 'over'\)/);
+  assert.doesNotMatch(script, /function rulesView/);
+  assert.doesNotMatch(script, /oauth_apple/);
+  assert.match(page, /Social Media sign in/);
+  assert.doesNotMatch(page, /data-page="rules"/);
+  assert.doesNotMatch(page, /oauth_apple/);
+  assert.doesNotMatch(page, />Apple</);
   assert.match(page, /clerk-user-button/);
   assert.match(page, /btn-sign-in/);
   assert.match(page, /Auth not configured/);

@@ -37,11 +37,13 @@ Either publishable name is enough. Both publishable **and** `CLERK_SECRET_KEY` m
 
 Also add this app’s URLs in Clerk: **Configure → Domains** (production host and `http://localhost:3000`).
 
-## 2. Enable Google, Apple, and X/Twitter
+## 2. Enable Google and X/Twitter
 
 OAuth app linking is done in Clerk / the provider consoles, not in this repo. Development instances can use Clerk’s **shared credentials**. Production needs your own OAuth apps.
 
-For all three providers:
+This app’s UI only offers **Google** and **X/Twitter**. Do not enable Apple for this project; the client provider list is `google` and `x` only.
+
+For both providers:
 
 1. Open [SSO connections](https://dashboard.clerk.com/~/user-authentication/sso-connections).
 2. **Add connection → For all users**.
@@ -56,19 +58,6 @@ For all three providers:
 - Authorized redirect URIs: paste Clerk’s URI.
 - Paste Client ID + Client Secret back into Clerk. Put the Google OAuth consent screen **In production** before real users sign in.
 
-### Apple
-
-- **Development:** choose Apple and save.
-- **Production:** you need an Apple Developer account. In Clerk, enable custom credentials and save **Email Source for Apple Private Email Relay** and **Return URL**.
-- Apple Developer → Identifiers:
-  - App ID with **Sign In with Apple** (the App ID Prefix is Clerk’s **Team ID**).
-  - Services ID (this is Clerk’s **Services ID / client_id**) with Sign In with Apple configured: domain = Clerk Frontend API host (no `https://`), return URL = Clerk’s Return URL.
-  - Key with Sign In with Apple: download the `.p8` (**Private Key**), note **Key ID**.
-- Configure Apple’s Private Email Relay with Clerk’s email source.
-- Paste Team ID, Services ID, Key ID, and the full PEM (including `BEGIN`/`END PRIVATE KEY`) into Clerk.
-
-Official walkthrough: [Sign in with Apple](https://clerk.com/docs/guides/configure/auth-strategies/social-connections/apple).
-
 ### X / Twitter
 
 - **Development:** choose **X/Twitter** and save.
@@ -82,7 +71,7 @@ Official walkthrough: [Sign in with Apple](https://clerk.com/docs/guides/configu
 
 Official walkthrough: [X/Twitter v2](https://clerk.com/docs/guides/configure/auth-strategies/social-connections/x-twitter).
 
-The header exposes Google / Apple / X buttons (`oauth_google`, `oauth_apple`, `oauth_x` with `oauth_twitter` fallback) plus Clerk’s Sign in / Sign up modals. Buttons only succeed after the matching SSO connection is enabled.
+The header labels the auth area **Social Media sign in** and exposes Google / X buttons (`oauth_google`, `oauth_x` with `oauth_twitter` fallback) plus Clerk’s Sign in / Sign up modals. Apple is not in the UI or the client provider list. Buttons only succeed after the matching SSO connection is enabled.
 
 ## 3. How this app uses Clerk
 

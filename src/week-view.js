@@ -2,6 +2,7 @@
 
 const { roadTravel, teamAbbr, teamCity } = require('./teams');
 const { toNumber, scoresReady, isLocked } = require('./grader');
+const { kickoffSlot } = require('./kickoff-slot');
 
 const SHORT_REST_DAYS = 5;
 
@@ -220,6 +221,7 @@ function enrichGame(game, history, wagersByGame = {}) {
     game_type: game.game_type,
     kickoff: game.kickoff,
     weekday: game.weekday,
+    kickoffSlot: kickoffSlot(game),
     home_team: game.home_team,
     away_team: game.away_team,
     home_score: game.home_score,
@@ -264,6 +266,7 @@ module.exports = {
   impliedPoints,
   formatLine,
   formatAtsPick,
+  kickoffSlot,
   resultLetter,
   scoringRates,
   projectGame,

@@ -29,6 +29,8 @@
         borderColor: '#FFB81C',
         color: '#ffffff'
       },
+      socialButtonsBlockButton__apple: { display: 'none' },
+      socialButtonsIconButton__apple: { display: 'none' },
       formButtonPrimary: { backgroundColor: '#FFB81C', color: '#111111' }
     }
   };
@@ -135,6 +137,45 @@
     if (shown == null) return team;
     const signed = line > 0 ? `+${shown}` : shown;
     return `${team} ${signed}`;
+  }
+  function outrightPickLabel(team) {
+    return `${team} win`;
+  }
+  function ouPickLabel(game, side) {
+    const word = side === 'over' ? 'Over' : 'Under';
+    const total = fmtNum(game.total_line);
+    return total === '—' ? word : `${word} ${total}`;
+  }
+  function kickoffSlotClass(game) {
+    if (game && game.kickoffSlot) return game.kickoffSlot;
+    const iso = typeof game === 'string' ? game : game && game.kickoff;
+    const d = new Date(iso);
+    let wd = typeof game === 'object' && game && game.weekday
+      ? String(game.weekday).slice(0, 3).toUpperCase()
+      : '';
+    let minutes = null;
+    if (Number.isFinite(d.getTime())) {
+      const parts = new Intl.DateTimeFormat('en-US', {
+        timeZone: 'America/New_York',
+        weekday: 'short',
+        hour: '2-digit',
+        minute: '2-digit',
+        hourCycle: 'h23'
+      }).formatToParts(d);
+      const get = (type) => {
+        const row = parts.find((p) => p.type === type);
+        return row ? row.value : '';
+      };
+      if (!wd) wd = String(get('weekday')).slice(0, 3).toUpperCase();
+      const hour = Number(get('hour'));
+      const minute = Number(get('minute'));
+      if (Number.isFinite(hour)) minutes = hour * 60 + (Number.isFinite(minute) ? minute : 0);
+    }
+    if (wd === 'THU' || wd === 'WED') return 'slot-thu';
+    if (wd === 'MON' || wd === 'TUE') return 'slot-mon';
+    if (minutes != null && minutes >= 19 * 60) return 'slot-sun-n';
+    if (minutes != null && minutes >= 15 * 60) return 'slot-sun-4';
+    return 'slot-sun-1';
   }
   function kickoffLabel(game) {
     const iso = typeof game === 'string' ? game : game && game.kickoff;
@@ -557,7 +598,8 @@
     const homeCity = (game.home && game.home.city) || game.home_team;
     const xAway = xPtsValue(game, 'away');
     const xHome = xPtsValue(game, 'home');
-    return `<article class="card matchup${game.locked ? ' locked' : ''}">
+    const slot = kickoffSlotClass(game);
+    return `<article class="card matchup${game.locked ? ' locked' : ''}${slot ? ` ${esc(slot)}` : ''}">
       <div class="card-head">
         <span class="kick">${esc(kickoffLabel(game))}</span>
         <span class="status${game.locked ? ' lock' : ''}">${game.locked ? 'LOCKED' : 'OPEN'}</span>
@@ -585,9 +627,9 @@
       </div>
       ${aiRaw ? `<div class="ai"><span>AI Pick:</span> ${esc(aiRaw)}</div>` : ''}
       <div class="picks">
-        ${pickRow(game, 'outright', game.away_team, game.home_team)}
+        ${pickRow(game, 'outright', game.away_team, game.home_team, outrightPickLabel(game.away_team), outrightPickLabel(game.home_team))}
         ${pickRow(game, 'ats', game.away_team, game.home_team, atsPickLabel(game, game.away_team), atsPickLabel(game, game.home_team))}
-        ${pickRow(game, 'ou', 'over', 'under')}
+        ${pickRow(game, 'ou', 'over', 'under', ouPickLabel(game, 'over'), ouPickLabel(game, 'under'))}
       </div>
     </article>`;
   }
@@ -844,24 +886,6 @@
     });
   }
 
-  function rulesView() {
-    return `<section class="rules panel">
-      <h1>Rules</h1>
-      <p class="lede">This is a season-long pick-em. It is not a survivor / suicide pool.</p>
-      <ul>
-        <li>Sign in with Google, Apple, or X (Twitter). You stay in the pool all season.</li>
-        <li>Each game can take up to three independent wagers: outright winner, ATS, and over/under.</li>
-        <li>Take any subset of those markets, on as many games as you want, or skip a game.</li>
-        <li>There is no one-pick-per-week rule and no cannot-reuse-team rule.</li>
-        <li>Each correct settled wager is 1 point. Wrong, push, tie, or a missed game is 0 — never elimination.</li>
-        <li>Picks lock at that game’s kickoff. Locked picks cannot change; unlocked picks can be updated until kickoff.</li>
-        <li>Standings: season points, then this week’s points as the tie-break.</li>
-        <li>ATS uses the posted spread (positive spread means home favored). Home covers if (home − away) &gt; spread. Equal is a push.</li>
-        <li>Over/under: over if home + away &gt; total; equal is a push.</li>
-      </ul>
-    </section>`;
-  }
-
   function render() {
     if (!state.bootstrap) {
       app.innerHTML = '<p>Loading…</p>';
@@ -871,7 +895,7 @@
     else if (state.page === 'week') app.innerHTML = weekView();
     else if (state.page === 'standings') app.innerHTML = `<section class="panel"><h1>Standings</h1>${standingsTable((state.standings && state.standings.standings) || state.bootstrap.standings || [], true)}</section>`;
     else if (state.page === 'history') app.innerHTML = historyView();
-    else app.innerHTML = rulesView();
+    else app.innerHTML = homeView();
 
     app.onclick = async (e) => {
       const chip = e.target.closest('[data-filter]');

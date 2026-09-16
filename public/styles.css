@@ -52,6 +52,10 @@ button, input, select { font: inherit; color: inherit; }
 }
 .login button:hover, .auth-slot button:hover { background: var(--gold); color: #111; }
 .auth-slot { display: flex; gap: 6px; align-items: center; margin-left: auto; flex-wrap: wrap; justify-content: flex-end; }
+.auth-label {
+  color: var(--gold); font-size: 12px; font-weight: 700; letter-spacing: 0.02em;
+  white-space: nowrap; margin-right: 4px;
+}
 .clerk-signed-out { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .clerk-user-button { min-height: 32px; display: flex; align-items: center; }
 .auth-notice { color: var(--amber); font-size: 12px; max-width: 320px; margin: 0; }
@@ -70,10 +74,24 @@ h1, h2 { margin: 0 0 8px; font-size: 22px; font-weight: 700; letter-spacing: 0.0
 .panel { background: var(--bg2); border: 1px solid var(--line); border-radius: 6px; padding: 10px; }
 .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 8px; }
 .week-cards { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.week-cards .card-head { font-size: 13px; }
+.week-cards .city { font-size: clamp(18px, 1.9vw, 24px); }
+.week-cards .role { font-size: 11px; }
+.week-cards .side-stat, .week-cards .stat { font-size: 13px; line-height: 1.4; }
+.week-cards .lines { font-size: 14px; }
+.week-cards .ai { font-size: 13px; }
+.week-cards .pick { grid-template-columns: 78px 1fr 1fr; gap: 7px; }
+.week-cards .pick label { font-size: 12px; }
+.week-cards .pick button { font-size: 14px; padding: 7px 8px; }
 .card, .matchup {
   background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px;
   display: flex; flex-direction: column; gap: 8px;
 }
+.card.slot-thu { background: #242424; border-color: #4a4a4a; }
+.card.slot-sun-1 { background: #1c1c1c; border-color: #3a3a3a; }
+.card.slot-sun-4 { background: #151515; border-color: #2e2e2e; }
+.card.slot-sun-n { background: #101010; border-color: #262626; }
+.card.slot-mon { background: #0b0b0b; border-color: #1c1c1c; }
 .card.locked { opacity: 0.82; }
 .card-head {
   display: flex; justify-content: space-between; align-items: baseline;
@@ -138,8 +156,6 @@ th.sorted { color: var(--gold); }
 th .caret { color: var(--gold); font-size: 10px; margin-left: 4px; }
 .me td { background: #1a1608; }
 .notice { color: var(--amber); }
-.rules { max-width: 720px; }
-.rules li { margin: 0 0 6px; }
 
 .hist-bar {
   display: flex; flex-direction: column; gap: 10px;

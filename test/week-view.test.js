@@ -133,4 +133,5 @@ test('enrichGame exposes lastGame, city, short rest, and xPts from the line', ()
   assert.equal(card.xPts.away, 24.5);
   assert.equal(card.xPts.home, 30);
   assert.equal(card.home.shortRestWinPct, null);
+  assert.equal(card.kickoffSlot, 'slot-thu');
 });

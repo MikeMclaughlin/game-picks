@@ -2,7 +2,7 @@
 
 const { assertUsername } = require('./username');
 
-const SOCIAL_PROVIDERS = ['google', 'apple', 'x'];
+const SOCIAL_PROVIDERS = ['google', 'x'];
 
 let cachedClient = null;
 
@@ -51,7 +51,7 @@ function authNotConfiguredPayload() {
     ok: false,
     auth: 'missing',
     error: 'Auth not configured',
-    hint: 'Set CLERK_SECRET_KEY and CLERK_PUBLISHABLE_KEY (or NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY) on the Vercel project. Enable Google, Apple, and X/Twitter in the Clerk Dashboard (see AUTH.md).'
+    hint: 'Set CLERK_SECRET_KEY and CLERK_PUBLISHABLE_KEY (or NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY) on the Vercel project. Enable Google and X/Twitter in the Clerk Dashboard (see AUTH.md).'
   };
 }
 
