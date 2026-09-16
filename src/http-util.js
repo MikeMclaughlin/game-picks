@@ -164,6 +164,7 @@ module.exports = {
   readSession,
   sessionCookie,
   clearCookie,
+  parseCookies,
   requireAdmin,
   json,
   readBody,

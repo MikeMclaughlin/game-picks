@@ -22,10 +22,11 @@ test('/api/health returns JSON', async () => {
   assert.equal(res.status, 200);
   assert.equal(body.ok, true);
   assert.equal(body.db, 'missing');
+  assert.equal(body.auth, 'missing');
   server.close();
 });
 
-test('/api/login without DATABASE_URL returns JSON 503', async () => {
+test('/api/login without Clerk keys returns JSON 503', async () => {
   const server = await listen();
   const { port } = server.address();
   const res = await fetch(`http://127.0.0.1:${port}/api/login`, {
@@ -36,8 +37,22 @@ test('/api/login without DATABASE_URL returns JSON 503', async () => {
   const body = await res.json();
   assert.equal(res.status, 503);
   assert.equal(body.ok, false);
-  assert.equal(body.db, 'missing');
-  assert.match(body.error, /DATABASE_URL/);
+  assert.equal(body.auth, 'missing');
+  assert.match(body.error, /Auth not configured/);
+  server.close();
+});
+
+test('/api/auth/config is public and omits secrets', async () => {
+  const server = await listen();
+  const { port } = server.address();
+  const res = await fetch(`http://127.0.0.1:${port}/api/auth/config`);
+  const body = await res.json();
+  assert.equal(res.status, 200);
+  assert.equal(body.ok, true);
+  assert.equal(body.configured, false);
+  assert.equal(body.publishableKey, null);
+  assert.equal(Object.prototype.hasOwnProperty.call(body, 'secretKey'), false);
+  assert.deepEqual(body.providers, ['google', 'apple', 'x']);
   server.close();
 });
 
@@ -46,7 +61,7 @@ test('/api/picks without DATABASE_URL returns JSON 503', async () => {
   const { port } = server.address();
   const res = await fetch(`http://127.0.0.1:${port}/api/picks`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', authorization: 'Bearer not-a-real-token' },
     body: JSON.stringify({ game_id: 'x', market: 'outright', selection: 'SEA' })
   });
   const body = await res.json();
@@ -66,6 +81,7 @@ test('/api/bootstrap returns JSON week payload', async () => {
   assert.ok(Array.isArray(body.games));
   assert.ok(body.season >= 2023);
   assert.ok(body.week >= 1);
+  assert.equal(body.clerk.configured, false);
   if (body.games.length) {
     const g = body.games[0];
     assert.ok(g.home_team);
@@ -137,6 +153,10 @@ test('/api/history supports filter query params', async () => {
   const page = await html.text();
   assert.match(page, /styles\.css\?v=/);
   assert.match(page, /app\.js\?v=/);
+  assert.match(page, /clerk-user-button/);
+  assert.match(page, /btn-sign-in/);
+  assert.match(page, /Auth not configured/);
+  assert.match(page, /__CLERK_CONFIG__/);
 
   server.close();
 });

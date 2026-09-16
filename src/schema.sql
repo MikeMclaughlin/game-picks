@@ -15,9 +15,15 @@ CREATE TABLE IF NOT EXISTS users (
   pool_id UUID NOT NULL REFERENCES pools(id) ON DELETE CASCADE,
   username TEXT NOT NULL,
   username_norm TEXT NOT NULL,
+  clerk_user_id TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (pool_id, username_norm)
 );
+
+ALTER TABLE users ADD COLUMN IF NOT EXISTS clerk_user_id TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS users_clerk_user_id_uidx
+  ON users (clerk_user_id)
+  WHERE clerk_user_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS games (
   game_id TEXT PRIMARY KEY,

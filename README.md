@@ -6,8 +6,9 @@ Each game can take up to three independent wagers — outright winner, against t
 
 ## Stack
 
-- Node.js `http` server only (no Express)
+- Node.js `http` server only (no Express, no Next.js)
 - Neon Postgres via `DATABASE_URL` and `@neondatabase/serverless` (HTTP)
+- Clerk social sign-in (Google, Apple, X/Twitter) via `@clerk/backend` + Clerk browser CDN
 - Vanilla `public/index.html`, `public/styles.css`, `public/app.js`
 - Schedule, scores, and lines from [nfldata.org](https://www.nfldata.org/) (`spread_line`, `total_line`, scores), with GitHub nflverse mirrors and `data/schedule-2026.json` as fallback
 
@@ -16,6 +17,9 @@ Each game can take up to three independent wagers — outright winner, against t
 | Name | Required | Purpose |
 | --- | --- | --- |
 | `DATABASE_URL` | Yes, to persist users / wagers / standings | Neon Postgres connection string |
+| `CLERK_SECRET_KEY` | Yes, for sign-in | Clerk secret key (`sk_…`) |
+| `CLERK_PUBLISHABLE_KEY` | Yes, for sign-in | Clerk publishable key (`pk_…`). `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` is also accepted (Marketplace name) |
+| `CLERK_JWT_KEY` | Optional | PEM JWT public key for networkless verify |
 | `ADMIN_KEY` | Optional | When set, `/api/import` and `/api/grade-all` require header `x-admin-key` (or `?key=`) |
 | `PORT` | Optional | Local listen port (default `3000`) |
 | `POOL_SLUG` | Optional | Default pool (default `default`) |
@@ -29,7 +33,9 @@ Do not commit secrets. Copy `.env.example` to `.env` locally.
 3. Locally: `export DATABASE_URL='postgresql://…'` or put it in `.env` and load it before `npm start`.
 4. On Vercel: Project → Settings → Environment Variables → add `DATABASE_URL` (Production + Preview). Root Directory should be the app folder (repo root).
 
-Without `DATABASE_URL`, `npm start` still boots. `/api/health` and `/api/bootstrap` still return JSON from the bundled 2023–2026 seed / 2026 schedule. Login and saved picks require the database.
+Without `DATABASE_URL`, `npm start` still boots. `/api/health` and `/api/bootstrap` still return JSON from the bundled 2023–2026 seed / 2026 schedule. Sign-in and saved picks require the database.
+
+Without Clerk keys, the app still boots. `/api/health` returns `auth: "missing"`. The header shows **Auth not configured** instead of crashing. See **[AUTH.md](AUTH.md)** for Vercel env vars and enabling Google, Apple, and X/Twitter in the Clerk Dashboard.
 
 ## Run locally
 
@@ -58,7 +64,7 @@ CLI `grade-all` and `GET`/`POST` `/api/grade-all` share the same grader.
 
 ## Product rules (server is source of truth)
 
-- Unique username per pool (`username_norm` = NFKC + trim + lower)
+- Unique username handle per pool (`username_norm` = NFKC + trim + lower), keyed to Clerk via `clerk_user_id`
 - One wager row per `(user, game, market)` where market is `outright | ats | ou`
 - Validate against the current line; reject after kickoff
 - Grade from stored scores + `spread_line` / `total_line` (nflverse: **positive `spread_line` means home favored**)
@@ -72,4 +78,4 @@ CLI `grade-all` and `GET`/`POST` `/api/grade-all` share the same grader.
 
 `vercel.json` routes all traffic to `server.js` (`@vercel/node`) and includes `public/**`, `src/**`, and `data/**`. Do not switch to `/api/[...path]` rewrites.
 
-Set `DATABASE_URL` on the Vercel project, then deploy.
+Set `DATABASE_URL` plus Clerk keys on the Vercel project (`CLERK_SECRET_KEY` and `CLERK_PUBLISHABLE_KEY` or `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`), enable Google / Apple / X in the Clerk Dashboard (see [AUTH.md](AUTH.md)), then deploy.
