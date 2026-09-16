@@ -9,14 +9,19 @@ const {
   json,
   readBody,
   readSession,
-  signSession,
-  sessionCookie,
   clearCookie,
   requireAdmin,
   mapGame,
   getPool
 } = require('./http-util');
-const { assertUsername } = require('./username');
+const {
+  isClerkConfigured,
+  publicClerkConfig,
+  authNotConfiguredPayload,
+  authenticateClerk,
+  fetchClerkUser,
+  upsertPoolUser
+} = require('./clerk-auth');
 const { validatePick, gradeAll, isLocked } = require('./grader');
 const { importGames, loadSeedGames, loadSchedule2026, defaultSeasons } = require('./nfl-data');
 const { enrichGame, currentSeasonWeek } = require('./week-view');
@@ -109,7 +114,15 @@ async function seedIfNeeded(sql) {
 function sendFile(res, filePath) {
   const ext = path.extname(filePath).toLowerCase();
   const type = MIME[ext] || 'application/octet-stream';
-  const body = fs.readFileSync(filePath);
+  let body = fs.readFileSync(filePath);
+  if (ext === '.html') {
+    let html = body.toString('utf8');
+    const cfg = JSON.stringify(publicClerkConfig());
+    if (!html.includes('window.__CLERK_CONFIG__')) {
+      html = html.replace('</head>', `<script>window.__CLERK_CONFIG__=${cfg};</script>\n</head>`);
+    }
+    body = Buffer.from(html, 'utf8');
+  }
   const noStore = ext === '.html' || ext === '.js' || ext === '.css';
   res.writeHead(200, {
     'content-type': type,
@@ -153,14 +166,51 @@ async function gamesForWeek(sql, season, week) {
 }
 
 async function currentUser(sql, req) {
+  if (sql) {
+    const clerk = await authenticateClerk(req);
+    if (clerk.userId) {
+      const pool = await getPool(sql);
+      const existing = await sql`
+        SELECT u.id, u.username, u.username_norm, u.pool_id, u.clerk_user_id, p.slug AS pool_slug
+        FROM users u JOIN pools p ON p.id = u.pool_id
+        WHERE u.clerk_user_id = ${clerk.userId} AND u.pool_id = ${pool.id}
+      `;
+      if (existing[0]) return existing[0];
+      const profile = await fetchClerkUser(clerk.userId);
+      return upsertPoolUser(sql, pool, profile || { id: clerk.userId });
+    }
+  }
   const session = readSession(req.headers.cookie);
   if (!session || !session.userId || !sql) return null;
   const rows = await sql`
-    SELECT u.id, u.username, u.username_norm, u.pool_id, p.slug AS pool_slug
+    SELECT u.id, u.username, u.username_norm, u.pool_id, u.clerk_user_id, p.slug AS pool_slug
     FROM users u JOIN pools p ON p.id = u.pool_id
     WHERE u.id = ${session.userId}
   `;
   return rows[0] || null;
+}
+
+function publicUser(user) {
+  if (!user) return null;
+  return {
+    id: user.id,
+    username: user.username,
+    pool: user.pool_slug,
+    clerk_user_id: user.clerk_user_id || null
+  };
+}
+
+function authMissing(res) {
+  return json(res, 503, authNotConfiguredPayload());
+}
+
+function signInRequired(res) {
+  return json(res, 401, {
+    ok: false,
+    error: isClerkConfigured()
+      ? 'Sign in with Google, Apple, or X to continue'
+      : 'Auth not configured'
+  });
 }
 
 async function userWagers(sql, userId, gameIds) {
@@ -240,6 +290,7 @@ async function handleApi(req, res, url) {
         ok: true,
         service: 'game-picks',
         db: 'missing',
+        auth: isClerkConfigured() ? 'ok' : 'missing',
         time: new Date().toISOString()
       });
     }
@@ -250,6 +301,7 @@ async function handleApi(req, res, url) {
         service: 'game-picks',
         db: dbPing.ok ? 'ok' : 'error',
         database: dbPing.ok ? 'ok' : dbPing.reason,
+        auth: isClerkConfigured() ? 'ok' : 'missing',
         time: new Date().toISOString()
       });
     } catch (err) {
@@ -258,9 +310,14 @@ async function handleApi(req, res, url) {
         service: 'game-picks',
         db: 'error',
         database: err.message,
+        auth: isClerkConfigured() ? 'ok' : 'missing',
         time: new Date().toISOString()
       });
     }
+  }
+
+  if (pathname === '/api/auth/config' && method === 'GET') {
+    return json(res, 200, { ok: true, ...publicClerkConfig() });
   }
 
   const { sql, db, status, error } = await withDb();
@@ -292,7 +349,8 @@ async function handleApi(req, res, url) {
       dbStatus: status || (db ? 'ok' : 'missing'),
       dbError: error || null,
       seed,
-      user: user ? { id: user.id, username: user.username, pool: user.pool_slug } : null,
+      user: publicUser(user),
+      clerk: publicClerkConfig(),
       season,
       week,
       games: cards,
@@ -303,30 +361,12 @@ async function handleApi(req, res, url) {
   }
 
   if (pathname === '/api/login' && method === 'POST') {
+    if (!isClerkConfigured()) return authMissing(res);
     if (!sql) return dbUnavailable(res, dbState);
-    const body = await readBody(req);
-    const { display, norm } = assertUsername(body.username);
-    const pool = await getPool(sql, body.pool || url.searchParams.get('pool'));
-    const existing = await sql`
-      SELECT id, username, username_norm FROM users
-      WHERE pool_id = ${pool.id} AND username_norm = ${norm}
-    `;
-    let user = existing[0];
-    if (!user) {
-      const inserted = await sql`
-        INSERT INTO users (pool_id, username, username_norm)
-        VALUES (${pool.id}, ${display}, ${norm})
-        RETURNING id, username, username_norm
-      `;
-      user = inserted[0];
-    }
-    const token = signSession({ userId: user.id, poolId: pool.id });
-    return json(
-      res,
-      200,
-      { ok: true, user: { id: user.id, username: user.username, pool: pool.slug } },
-      { 'set-cookie': sessionCookie(token) }
-    );
+    await readBody(req);
+    const user = await currentUser(sql, req);
+    if (!user) return signInRequired(res);
+    return json(res, 200, { ok: true, user: publicUser(user), clerk: publicClerkConfig() });
   }
 
   if (pathname === '/api/logout' && (method === 'POST' || method === 'GET')) {
@@ -349,13 +389,22 @@ async function handleApi(req, res, url) {
     const weeks = [...new Set(games.filter((g) => g.season === season && g.game_type !== 'PRE').map((g) => g.week))].sort(
       (a, b) => a - b
     );
-    return json(res, 200, { ok: true, db, season, week, weeks, games: cards, user: user ? { username: user.username } : null });
+    return json(res, 200, {
+      ok: true,
+      db,
+      season,
+      week,
+      weeks,
+      games: cards,
+      user: publicUser(user),
+      clerk: publicClerkConfig()
+    });
   }
 
   if (pathname === '/api/picks' && method === 'POST') {
     if (!sql) return dbUnavailable(res, dbState);
     const user = await currentUser(sql, req);
-    if (!user) return json(res, 401, { ok: false, error: 'Sign in with a username first' });
+    if (!user) return signInRequired(res);
     const body = await readBody(req);
     const picks = Array.isArray(body.picks) ? body.picks : [body];
     const saved = [];
@@ -444,7 +493,7 @@ async function handleApi(req, res, url) {
   if (pathname === '/api/me/wagers' && method === 'GET') {
     if (!sql) return json(res, 200, { ok: true, wagers: [] });
     const user = await currentUser(sql, req);
-    if (!user) return json(res, 401, { ok: false, error: 'Sign in with a username first' });
+    if (!user) return signInRequired(res);
     const rows = await userWagers(sql, user.id);
     return json(res, 200, { ok: true, wagers: rows });
   }

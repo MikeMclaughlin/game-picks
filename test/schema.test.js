@@ -9,6 +9,8 @@ test('schema SQL is bundled and splits into statements', () => {
   const text = loadSchemaSql();
   assert.match(text, /CREATE TABLE IF NOT EXISTS games/);
   assert.match(text, /CREATE TABLE IF NOT EXISTS wagers/);
+  assert.match(text, /clerk_user_id/);
+  assert.match(text, /ADD COLUMN IF NOT EXISTS clerk_user_id/);
   const stmts = splitSqlStatements(text);
   assert.ok(stmts.length >= 8);
 });

@@ -4,7 +4,7 @@
   "private": true,
   "description": "Season-long NFL pick-em (outright, ATS, over/under). Not a survivor pool.",
   "engines": {
-    "node": ">=18"
+    "node": ">=20.9.0"
   },
   "main": "server.js",
   "scripts": {
@@ -15,6 +15,7 @@
     "test": "node --test test/*.test.js"
   },
   "dependencies": {
+    "@clerk/backend": "^3.18.1",
     "@neondatabase/serverless": "^1.0.2"
   }
 }

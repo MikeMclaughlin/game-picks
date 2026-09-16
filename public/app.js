@@ -1,9 +1,37 @@
 (() => {
   const app = document.getElementById('app');
   const tabs = document.getElementById('tabs');
-  const login = document.getElementById('login');
   const who = document.getElementById('who');
-  const usernameInput = document.getElementById('username');
+  const authNotice = document.getElementById('auth-notice');
+  const signedOutEl = document.getElementById('clerk-signed-out');
+  const userButtonEl = document.getElementById('clerk-user-button');
+  const btnSignIn = document.getElementById('btn-sign-in');
+  const btnSignUp = document.getElementById('btn-sign-up');
+
+  const CLERK_APPEARANCE = {
+    variables: {
+      colorPrimary: '#FFB81C',
+      colorBackground: '#111111',
+      colorInputBackground: '#0b0b0b',
+      colorInputText: '#ffffff',
+      colorText: '#ffffff',
+      colorTextSecondary: '#b0b0b0',
+      colorTextOnPrimaryBackground: '#111111',
+      colorNeutral: '#ffffff',
+      borderRadius: '4px'
+    },
+    elements: {
+      card: { backgroundColor: '#161616', boxShadow: 'none', border: '1px solid #2a2a2a' },
+      headerTitle: { color: '#ffffff' },
+      headerSubtitle: { color: '#b0b0b0' },
+      socialButtonsBlockButton: {
+        backgroundColor: '#1a1a1a',
+        borderColor: '#FFB81C',
+        color: '#ffffff'
+      },
+      formButtonPrimary: { backgroundColor: '#FFB81C', color: '#111111' }
+    }
+  };
 
   const state = {
     page: 'home',
@@ -32,6 +60,8 @@
     historySort: { key: 'team', dir: 'asc' },
     historyLoading: false
   };
+  let clerk = null;
+  let lastClerkUserId = undefined;
   const DEFAULT_HIST = {
     team: 'ALL',
     from: 2023,
@@ -94,9 +124,18 @@
   }
 
   async function api(path, opts) {
+    const headers = { 'content-type': 'application/json', ...(opts && opts.headers) };
+    if (clerk && clerk.session) {
+      try {
+        const token = await clerk.session.getToken();
+        if (token) headers.Authorization = `Bearer ${token}`;
+      } catch {
+        /* signed out or token unavailable */
+      }
+    }
     const res = await fetch(path, {
       credentials: 'same-origin',
-      headers: { 'content-type': 'application/json', ...(opts && opts.headers) },
+      headers,
       ...opts
     });
     const data = await res.json().catch(() => ({ ok: false, error: res.statusText }));
@@ -109,8 +148,165 @@
     return data;
   }
   function setWho(user) {
-    who.textContent = user ? `${user.username} · signed in` : '';
-    if (user) usernameInput.placeholder = user.username;
+    const clerkUser = clerk && clerk.user;
+    const name = (user && user.username)
+      || (clerkUser && (clerkUser.fullName || clerkUser.username || (clerkUser.primaryEmailAddress && clerkUser.primaryEmailAddress.emailAddress)))
+      || '';
+    who.textContent = name ? `${name} · signed in` : '';
+  }
+
+  function showAuthNotice(message) {
+    if (!authNotice) return;
+    if (!message) {
+      authNotice.hidden = true;
+      authNotice.textContent = '';
+      return;
+    }
+    authNotice.hidden = false;
+    authNotice.textContent = message;
+  }
+
+  function clerkConfigFrom(payload) {
+    if (payload && payload.clerk) return payload.clerk;
+    if (payload && Object.prototype.hasOwnProperty.call(payload, 'configured')) return payload;
+    return window.__CLERK_CONFIG__ || { configured: false };
+  }
+
+  function frontendApiFromKey(key) {
+    try {
+      const packed = String(key || '').split('_').slice(2).join('_');
+      if (!packed) return null;
+      const decoded = atob(packed.replace(/-/g, '+').replace(/_/g, '/'));
+      return decoded.replace(/\$+$/, '') || null;
+    } catch {
+      return null;
+    }
+  }
+
+  function loadScript(src, attrs) {
+    return new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = src;
+      s.async = true;
+      s.crossOrigin = 'anonymous';
+      if (attrs) Object.keys(attrs).forEach((k) => { s.setAttribute(k, attrs[k]); });
+      s.onload = resolve;
+      s.onerror = () => reject(new Error(`Failed to load ${src}`));
+      document.head.appendChild(s);
+    });
+  }
+
+  async function initClerkSdk(cfg) {
+    const key = cfg && cfg.publishableKey;
+    if (!key) throw new Error('Missing Clerk publishable key');
+    const domain = cfg.frontendApi || frontendApiFromKey(key);
+    if (domain) {
+      try {
+        try {
+          await loadScript(`https://${domain}/npm/@clerk/ui@1/dist/ui.browser.js`);
+        } catch {
+          /* UI bundle optional on older clerk-js */
+        }
+        await loadScript(`https://${domain}/npm/@clerk/clerk-js@6/dist/clerk.browser.js`, {
+          'data-clerk-publishable-key': key
+        });
+        if (window.Clerk && typeof window.Clerk.load === 'function') {
+          const opts = { appearance: CLERK_APPEARANCE };
+          if (window.__internal_ClerkUICtor) opts.ui = { ClerkUI: window.__internal_ClerkUICtor };
+          await window.Clerk.load(opts);
+          return window.Clerk;
+        }
+      } catch (err) {
+        console.warn('Clerk FAPI CDN failed, trying jsDelivr', err);
+      }
+    }
+    await loadScript('https://cdn.jsdelivr.net/npm/@clerk/clerk-js@5/dist/clerk.browser.js');
+    const ClerkGlobal = window.Clerk;
+    if (!ClerkGlobal) throw new Error('Clerk browser SDK failed to load');
+    const instance = typeof ClerkGlobal === 'function' ? new ClerkGlobal(key) : ClerkGlobal;
+    await instance.load({ appearance: CLERK_APPEARANCE });
+    return instance;
+  }
+
+  function renderAuthChrome() {
+    const signedIn = Boolean(clerk && clerk.isSignedIn);
+    if (signedOutEl) signedOutEl.hidden = signedIn;
+    if (userButtonEl) {
+      userButtonEl.hidden = !signedIn;
+      if (signedIn && clerk && typeof clerk.mountUserButton === 'function' && !userButtonEl.dataset.mounted) {
+        clerk.mountUserButton(userButtonEl, { appearance: CLERK_APPEARANCE, showName: false });
+        userButtonEl.dataset.mounted = '1';
+      }
+    }
+  }
+
+  async function syncClerkUser() {
+    if (!clerk || !clerk.session) return;
+    try {
+      const data = await api('/api/login', { method: 'POST', body: '{}' });
+      if (state.bootstrap) state.bootstrap.user = data.user;
+      setWho(data.user);
+    } catch (err) {
+      showBanner(err.payload || { error: err.message });
+    }
+  }
+
+  async function startOAuth(strategy) {
+    if (!clerk || !clerk.client || !clerk.client.signIn) {
+      throw new Error('Clerk is still loading');
+    }
+    const redirectUrl = `${window.location.origin}/`;
+    const strategies = strategy === 'oauth_x' ? ['oauth_x', 'oauth_twitter'] : [strategy];
+    let lastErr = null;
+    for (const s of strategies) {
+      try {
+        await clerk.client.signIn.authenticateWithRedirect({
+          strategy: s,
+          redirectUrl,
+          redirectUrlComplete: redirectUrl
+        });
+        return;
+      } catch (err) {
+        lastErr = err;
+      }
+    }
+    throw lastErr || new Error('Social sign-in failed');
+  }
+
+  async function setupClerk(cfg) {
+    if (!cfg || !cfg.configured || !cfg.publishableKey) {
+      showAuthNotice('Auth not configured. Set CLERK_SECRET_KEY and CLERK_PUBLISHABLE_KEY (see AUTH.md).');
+      if (signedOutEl) signedOutEl.hidden = true;
+      if (userButtonEl) userButtonEl.hidden = true;
+      return;
+    }
+    showAuthNotice('');
+    try {
+      clerk = await initClerkSdk(cfg);
+    } catch (err) {
+      showAuthNotice(err.message || 'Auth not configured');
+      return;
+    }
+    renderAuthChrome();
+    lastClerkUserId = clerk.isSignedIn ? (clerk.user && clerk.user.id) || null : null;
+    clerk.addListener(({ user }) => {
+      const id = (user && user.id) || null;
+      if (id === lastClerkUserId) return;
+      lastClerkUserId = id;
+      renderAuthChrome();
+      setWho(state.bootstrap && state.bootstrap.user);
+      state.bootstrap = null;
+      state.week = null;
+      if (id) {
+        syncClerkUser().then(() => load()).catch(showPageError);
+      } else {
+        api('/api/logout', { method: 'POST', body: '{}' }).catch(() => {});
+        load().catch(showPageError);
+      }
+    });
+    if (clerk.isSignedIn) {
+      await syncClerkUser();
+    }
   }
 
   function historyQuery(filters) {
@@ -169,28 +365,40 @@
     load().catch(showPageError);
   });
 
-  login.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    try {
-      const data = await api('/api/login', {
-        method: 'POST',
-        body: JSON.stringify({ username: usernameInput.value })
-      });
-      setWho(data.user);
-      usernameInput.value = '';
-      state.bootstrap = null;
-      state.week = null;
-      await load();
-    } catch (err) {
-      showBanner(err.payload || { error: err.message });
-    }
-  });
+  if (signedOutEl) {
+    signedOutEl.addEventListener('click', async (e) => {
+      const oauth = e.target.closest('[data-oauth]');
+      if (oauth) {
+        try {
+          await startOAuth(oauth.dataset.oauth);
+        } catch (err) {
+          showBanner({ error: err.message || 'Social sign-in failed' });
+        }
+        return;
+      }
+      if (e.target.closest('#btn-sign-in') && clerk && typeof clerk.openSignIn === 'function') {
+        clerk.openSignIn({ appearance: CLERK_APPEARANCE, withSignUp: true });
+        return;
+      }
+      if (e.target.closest('#btn-sign-up') && clerk && typeof clerk.openSignUp === 'function') {
+        clerk.openSignUp({ appearance: CLERK_APPEARANCE });
+      }
+    });
+  }
+  if (btnSignIn) btnSignIn.type = 'button';
+  if (btnSignUp) btnSignUp.type = 'button';
 
   async function load() {
     const gen = ++loadGen;
     if (!state.bootstrap) state.bootstrap = await api('/api/bootstrap');
     if (gen !== loadGen) return;
     setWho(state.bootstrap.user);
+    const cfg = clerkConfigFrom(state.bootstrap);
+    if (!cfg.configured) {
+      showAuthNotice('Auth not configured. Set CLERK_SECRET_KEY and CLERK_PUBLISHABLE_KEY (see AUTH.md).');
+    } else {
+      showAuthNotice('');
+    }
     if (state.bootstrap.db) showBanner(null);
     else {
       showBanner({
@@ -552,7 +760,7 @@
       <h1>Rules</h1>
       <p class="lede">This is a season-long pick-em. It is not a survivor / suicide pool.</p>
       <ul>
-        <li>Sign in with a unique username (case-insensitive). You stay in the pool all season.</li>
+        <li>Sign in with Google, Apple, or X (Twitter). You stay in the pool all season.</li>
         <li>Each game can take up to three independent wagers: outright winner, ATS, and over/under.</li>
         <li>Take any subset of those markets, on as many games as you want, or skip a game.</li>
         <li>There is no one-pick-per-week rule and no cannot-reuse-team rule.</li>
@@ -633,5 +841,20 @@
     }
   }
 
-  load().catch(showPageError);
+  (async () => {
+    let cfg = window.__CLERK_CONFIG__;
+    if (!cfg) {
+      try {
+        cfg = await api('/api/auth/config');
+      } catch {
+        cfg = { configured: false };
+      }
+    }
+    try {
+      await setupClerk(cfg);
+    } catch (err) {
+      showAuthNotice(err.message || 'Auth not configured');
+    }
+    await load();
+  })().catch(showPageError);
 })();
