@@ -11,10 +11,12 @@
     week: null,
     standings: null,
     history: null,
+    historyError: null,
     filters: { homeDog: false, projOver: false, projUnder: false },
     sort: { key: 'season_points', dir: 'desc' },
     historyTeam: 'ALL'
   };
+  let loadGen = 0;
 
   function fmtPct(v) {
     if (v == null) return '—';
@@ -68,14 +70,25 @@
     if (user) usernameInput.placeholder = user.username;
   }
 
+  function showPageError(err) {
+    app.innerHTML = `<p class="notice">${(err && err.message) || 'Request failed'}</p>`;
+  }
+
   tabs.addEventListener('click', (e) => {
     const btn = e.target.closest('button[data-page]');
     if (!btn) return;
     state.page = btn.dataset.page;
+    if (state.page === 'history') {
+      state.history = null;
+      state.historyError = null;
+    } else if (state.page === 'week') {
+      state.week = null;
+    } else if (state.page === 'standings') {
+      state.standings = null;
+    }
     for (const b of tabs.querySelectorAll('button')) b.classList.toggle('on', b === btn);
-    load().catch((err) => {
-      app.innerHTML = `<p class="notice">${err.message}</p>`;
-    });
+    render();
+    load().catch(showPageError);
   });
 
   login.addEventListener('submit', async (e) => {
@@ -96,7 +109,9 @@
   });
 
   async function load() {
+    const gen = ++loadGen;
     if (!state.bootstrap) state.bootstrap = await api('/api/bootstrap');
+    if (gen !== loadGen) return;
     setWho(state.bootstrap.user);
     if (state.bootstrap.db) showBanner(null);
     else {
@@ -105,15 +120,34 @@
         hint: 'Browse the week now. Sign-in and saved picks wait on DATABASE_URL (Neon on Vercel).'
       });
     }
-    if (state.page === 'week' && !state.week) {
-      state.week = await api(`/api/week?season=${state.bootstrap.season}&week=${state.bootstrap.week}`);
+    render();
+    try {
+      if (state.page === 'week' && !state.week) {
+        const week = await api(`/api/week?season=${state.bootstrap.season}&week=${state.bootstrap.week}`);
+        if (gen !== loadGen) return;
+        state.week = week;
+      }
+      if (state.page === 'standings' && !state.standings) {
+        const standings = await api('/api/standings');
+        if (gen !== loadGen) return;
+        state.standings = standings;
+      }
+      if (state.page === 'history' && !state.history) {
+        const history = await api(`/api/history?team=${encodeURIComponent(state.historyTeam)}`);
+        if (gen !== loadGen) return;
+        state.history = history;
+        state.historyError = null;
+      }
+    } catch (err) {
+      if (gen !== loadGen) return;
+      if (state.page === 'history') {
+        state.historyError = (err && err.message) || 'Failed to load history';
+        render();
+        return;
+      }
+      throw err;
     }
-    if (state.page === 'standings' && !state.standings) {
-      state.standings = await api('/api/standings');
-    }
-    if (state.page === 'history' && !state.history) {
-      state.history = await api(`/api/history?team=${state.historyTeam}`);
-    }
+    if (gen !== loadGen) return;
     render();
   }
 
@@ -290,6 +324,7 @@
 
   function historyView() {
     const h = state.history;
+    if (state.historyError) return `<p class="notice">${state.historyError}</p>`;
     if (!h) return '<p>Loading history…</p>';
     const cols = [
       { key: 'team', label: 'Team', title: 'Team abbreviation' },
@@ -315,29 +350,29 @@
         <label>Team
           <select id="hist-team" title="Filter splits to one team">
             <option value="ALL">ALL</option>
-            ${(state.bootstrap.teams || []).map((t) => `<option value="${t}" ${t === state.historyTeam ? 'selected' : ''}>${t}</option>`).join('')}
+            ${(state.bootstrap?.teams || []).map((t) => `<option value="${t}" ${t === state.historyTeam ? 'selected' : ''}>${t}</option>`).join('')}
           </select>
         </label>
       </div>
       <table>
         <thead><tr>${cols.map((c) => `<th title="${c.title}">${c.label}</th>`).join('')}</tr></thead>
         <tbody>${(h.rows || []).map((r) => `<tr>
-          <td>${r.team}</td>
-          <td>${r.games}</td>
-          <td>${rec(r.ats)}</td>
-          <td>${rec(r.ou)}</td>
-          <td>${rec(r.home)}</td>
-          <td>${rec(r.road)}</td>
-          <td>${rec(r.weather.dome)}</td>
-          <td>${rec(r.weather.outdoors)}</td>
-          <td>${rec(r.weather.cold)}</td>
-          <td>${rec(r.weather.windy)}</td>
-          <td>${rec(r.travel.east)}</td>
-          <td>${rec(r.travel.west)}</td>
-          <td>${rec(r.rest.short)}</td>
-          <td>${rec(r.after.win)}</td>
-          <td>${rec(r.after.loss)}</td>
-          <td>${rec(r.after.bye)}</td>
+          <td>${r?.team ?? ''}</td>
+          <td>${r?.games ?? ''}</td>
+          <td>${rec(r?.ats)}</td>
+          <td>${rec(r?.ou)}</td>
+          <td>${rec(r?.home)}</td>
+          <td>${rec(r?.road)}</td>
+          <td>${rec(r?.weather?.dome)}</td>
+          <td>${rec(r?.weather?.outdoors)}</td>
+          <td>${rec(r?.weather?.cold)}</td>
+          <td>${rec(r?.weather?.windy)}</td>
+          <td>${rec(r?.travel?.east)}</td>
+          <td>${rec(r?.travel?.west)}</td>
+          <td>${rec(r?.rest?.short)}</td>
+          <td>${rec(r?.after?.win)}</td>
+          <td>${rec(r?.after?.loss)}</td>
+          <td>${rec(r?.after?.bye)}</td>
         </tr>`).join('')}</tbody>
       </table>
     </section>`;
@@ -394,15 +429,18 @@
     };
     const hist = document.getElementById('hist-team');
     if (hist) {
-      hist.onchange = async () => {
+      hist.onchange = () => {
         state.historyTeam = hist.value;
-        state.history = await api(`/api/history?team=${state.historyTeam}`);
+        state.history = null;
+        state.historyError = null;
         render();
+        load().catch((err) => {
+          state.historyError = (err && err.message) || 'Failed to load history';
+          render();
+        });
       };
     }
   }
 
-  load().catch((err) => {
-    app.innerHTML = `<p class="notice">${err.message}</p>`;
-  });
+  load().catch(showPageError);
 })();
