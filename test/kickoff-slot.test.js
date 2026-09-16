@@ -4,7 +4,9 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { kickoffSlot } = require('../src/kickoff-slot');
 
-test('kickoff windows map weekday/time in ET light → dark', () => {
+test('Wednesday and Saturday kickoffs have their own shade slots', () => {
+  assert.equal(kickoffSlot({ kickoff: '2026-09-16T20:15:00-04:00', weekday: 'Wednesday' }), 'slot-wed');
+  assert.equal(kickoffSlot({ kickoff: '2026-09-12T13:00:00-04:00', weekday: 'Saturday' }), 'slot-sat');
   assert.equal(kickoffSlot({ kickoff: '2026-09-17T20:15:00-04:00', weekday: 'Thursday' }), 'slot-thu');
   assert.equal(kickoffSlot({ kickoff: '2026-09-13T13:00:00-04:00', weekday: 'Sunday' }), 'slot-sun-1');
   assert.equal(kickoffSlot({ kickoff: '2026-09-13T16:05:00-04:00', weekday: 'Sunday' }), 'slot-sun-4');
@@ -18,7 +20,9 @@ test('London-style Sunday morning still sits in the early Sunday band', () => {
 });
 
 test('ISO-only kickoffs still classify in America/New_York', () => {
-  assert.equal(kickoffSlot('2026-09-17T00:15:00Z'), 'slot-thu');
+  assert.equal(kickoffSlot('2026-09-17T00:15:00Z'), 'slot-wed');
+  assert.equal(kickoffSlot('2026-09-18T00:15:00Z'), 'slot-thu');
+  assert.equal(kickoffSlot('2026-09-12T17:00:00Z'), 'slot-sat');
   assert.equal(kickoffSlot('2026-09-13T17:00:00Z'), 'slot-sun-1');
   assert.equal(kickoffSlot('2026-09-13T20:05:00Z'), 'slot-sun-4');
   assert.equal(kickoffSlot('2026-09-14T00:20:00Z'), 'slot-sun-n');

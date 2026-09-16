@@ -36,7 +36,7 @@
   };
 
   const state = {
-    page: 'home',
+    page: 'week',
     bootstrap: null,
     week: null,
     standings: null,
@@ -60,6 +60,7 @@
     },
     historyMore: false,
     historySort: { key: 'team', dir: 'asc' },
+    historyGameSort: { key: 'gameDate', dir: 'desc' },
     historyLoading: false
   };
   let clerk = null;
@@ -171,7 +172,9 @@
       const minute = Number(get('minute'));
       if (Number.isFinite(hour)) minutes = hour * 60 + (Number.isFinite(minute) ? minute : 0);
     }
-    if (wd === 'THU' || wd === 'WED') return 'slot-thu';
+    if (wd === 'WED') return 'slot-wed';
+    if (wd === 'THU') return 'slot-thu';
+    if (wd === 'SAT' || wd === 'FRI') return 'slot-sat';
     if (wd === 'MON' || wd === 'TUE') return 'slot-mon';
     if (minutes != null && minutes >= 19 * 60) return 'slot-sun-n';
     if (minutes != null && minutes >= 15 * 60) return 'slot-sun-4';
@@ -545,11 +548,12 @@
     if (side.lastGame && side.lastGame.label) return side.lastGame.label;
     if (side.lastGame && side.lastGame.result) {
       if (side.lastGame.result !== 'Tie' && side.lastGame.margin != null) {
-        return `${side.lastGame.result} by ${side.lastGame.margin}`;
+        const signed = side.lastGame.result === 'Win' ? `+${side.lastGame.margin}` : `-${side.lastGame.margin}`;
+        return side.lastGame.result === 'Win' ? `WIN ${signed}` : `Loss ${signed}`;
       }
       return side.lastGame.result;
     }
-    if (side.last === 'W') return 'Win';
+    if (side.last === 'W') return 'WIN';
     if (side.last === 'L') return 'Loss';
     if (side.last === 'T') return 'Tie';
     return null;
@@ -561,38 +565,107 @@
     return null;
   }
 
-  function sideStats(side, isHome) {
-    if (!side) return '';
-    const rows = [];
-    const last = lastGameLabel(side);
-    if (last) {
-      const detail = side.lastGame && side.lastGame.opponent != null
-        ? ` title="vs ${esc(side.lastGame.opponent)} ${side.lastGame.teamScore}-${side.lastGame.oppScore}"`
-        : '';
-      rows.push(`<div class="side-stat muted"${detail}>Last game: ${esc(last)}</div>`);
-    }
-    if (side.lastFive) {
-      rows.push(`<div class="side-stat muted" title="Last 5 outright results, oldest to newest (ties omitted)">Last 5: ${esc(side.lastFive)}</div>`);
-    }
-    if (side.lastFiveAts) {
-      rows.push(`<div class="side-stat muted" title="Last 5 ATS covers (C) or fails (F), oldest to newest; pushes omitted">ATS 5: ${esc(side.lastFiveAts)}</div>`);
-    }
+  function signedSpreadPts(game, team) {
+    if (game.spread_line == null) return null;
+    const spread = Number(game.spread_line);
+    if (!Number.isFinite(spread)) return null;
+    const line = team === game.home_team ? -spread : spread;
+    const shown = formatAtsLine(line);
+    if (shown == null) return null;
+    return line > 0 ? `+${shown}` : shown;
+  }
+
+  function restCell(side) {
+    if (!side) return { html: '', cls: 'muted' };
     const rest = side.rest;
     const showRest = side.showRest === true || (side.showRest !== false && rest != null && Number(rest) !== 7);
-    if (rest != null && showRest) {
-      const shortBit = side.short ? ' SHORT' : '';
-      rows.push(`<div class="side-stat${side.short ? ' alert' : ' muted'}">Rest Days: ${esc(rest)}${shortBit}</div>`);
+    if (rest == null || !showRest) return { html: '', cls: 'muted' };
+    const shortBit = side.short ? ' Short' : '';
+    return { html: esc(`${rest}${shortBit}`), cls: side.short ? 'alert' : 'muted' };
+  }
+
+  function statCell(text, cls) {
+    if (text == null || text === '') return { html: '', cls: cls || 'muted' };
+    return { html: esc(text), cls: cls || '' };
+  }
+
+  function statRow(label, away, home) {
+    if ((!away || !away.html) && (!home || !home.html)) return '';
+    const aCls = `side-stat ${away && away.cls ? away.cls : 'muted'}`;
+    const hCls = `side-stat home ${home && home.cls ? home.cls : 'muted'}`;
+    return `<div class="stat-row">
+      <div class="${aCls}">${away && away.html ? away.html : ''}</div>
+      <div class="stat-lab">${esc(label)}</div>
+      <div class="${hCls}">${home && home.html ? home.html : ''}</div>
+    </div>`;
+  }
+
+  function showRestAmountWinPct(side) {
+    if (!side || side.rest == null) return false;
+    if (side.showRestWinPct === false) return false;
+    const n = Number(side.rest);
+    if (n === 7 || n === 8) return false;
+    return side.restWinPct != null;
+  }
+
+  function cardStatRows(game) {
+    const away = game.away || {};
+    const home = game.home || {};
+    const lastA = lastGameLabel(away);
+    const lastH = lastGameLabel(home);
+    const restA = restCell(away);
+    const restH = restCell(home);
+    const rows = [];
+    rows.push(statRow('Last Game', statCell(lastA), statCell(lastH)));
+    rows.push(statRow('Rest Days', restA, restH));
+    if ((away.short && away.shortRestWinPct != null) || (home.short && home.shortRestWinPct != null)) {
+      rows.push(statRow(
+        'Win % Short Rest',
+        statCell(away.short && away.shortRestWinPct != null ? fmtPct(away.shortRestWinPct) : '', away.short ? 'alert' : 'muted'),
+        statCell(home.short && home.shortRestWinPct != null ? fmtPct(home.shortRestWinPct) : '', home.short ? 'alert' : 'muted')
+      ));
     }
-    if (side.short && side.shortRestWinPct != null) {
-      rows.push(`<div class="side-stat alert">Win% ${fmtPct(side.shortRestWinPct)} on Short Rest</div>`);
+    if (showRestAmountWinPct(away) || showRestAmountWinPct(home)) {
+      rows.push(statRow(
+        'Win % Rest',
+        statCell(showRestAmountWinPct(away) ? fmtPct(away.restWinPct) : '', 'muted'),
+        statCell(showRestAmountWinPct(home) ? fmtPct(home.restWinPct) : '', 'muted')
+      ));
     }
-    if (isHome && side.homeWinPct != null) {
-      rows.push(`<div class="side-stat muted">Home Win%: ${fmtPct(side.homeWinPct)}</div>`);
-    }
-    if (!isHome && side.awayWinPct != null) {
-      rows.push(`<div class="side-stat muted">Away Win%: ${fmtPct(side.awayWinPct)}</div>`);
-    }
-    return rows.join('');
+    rows.push(statRow(
+      'Win %',
+      statCell(away.awayWinPct != null ? `away ${fmtPct(away.awayWinPct)}` : '', 'muted'),
+      statCell(home.homeWinPct != null ? `home ${fmtPct(home.homeWinPct)}` : '', 'muted')
+    ));
+    rows.push(statRow(
+      'Spread Pts',
+      statCell(signedSpreadPts(game, game.away_team)),
+      statCell(signedSpreadPts(game, game.home_team))
+    ));
+    const total = fmtNum(game.total_line);
+    rows.push(statRow(
+      'Over/Under',
+      statCell(total === '—' ? '' : total, 'muted'),
+      statCell(total === '—' ? '' : total, 'muted')
+    ));
+    const xAway = fmtNum(xPtsValue(game, 'away'));
+    const xHome = fmtNum(xPtsValue(game, 'home'));
+    rows.push(statRow(
+      'Expected Points',
+      statCell(xAway === '—' ? '' : xAway),
+      statCell(xHome === '—' ? '' : xHome)
+    ));
+    rows.push(statRow(
+      'Last 5 games',
+      statCell(away.lastFive, 'muted'),
+      statCell(home.lastFive, 'muted')
+    ));
+    rows.push(statRow(
+      'Last 5 ATS',
+      statCell(away.lastFiveAts, 'muted'),
+      statCell(home.lastFiveAts, 'muted')
+    ));
+    return `<div class="stat-rows">${rows.join('')}</div>`;
   }
 
   function pickRow(game, market, left, right, leftText, rightText) {
@@ -627,8 +700,6 @@
     const aiRaw = game.aiPick && game.aiPick.label ? game.aiPick.label.replace(/^AI Pick:\s*/i, '').trim() : '';
     const awayCity = (game.away && game.away.city) || game.away_team;
     const homeCity = (game.home && game.home.city) || game.home_team;
-    const xAway = xPtsValue(game, 'away');
-    const xHome = xPtsValue(game, 'home');
     const slot = kickoffSlotClass(game);
     return `<article class="card matchup${game.locked ? ' locked' : ''}${slot ? ` ${esc(slot)}` : ''}">
       <div class="card-head">
@@ -639,28 +710,21 @@
         <div class="team">
           <div class="city">${esc(awayCity)}</div>
           <div class="role">AWAY</div>
-          <div class="side-stats">${sideStats(game.away, false)}</div>
         </div>
         <div class="vs">@</div>
         <div class="team home">
           <div class="city">${esc(homeCity)}</div>
           <div class="role">HOME</div>
-          <div class="side-stats">${sideStats(game.home, true)}</div>
         </div>
       </div>
-      <div class="lines">
-        <div><span class="k">spread</span> <b>${esc(spreadLabel(game))}</b></div>
-        <div class="total${game.fadeTotal ? ' fade' : ''}"><span class="k">total</span> <b>O/U ${fmtNum(game.total_line)}</b></div>
-      </div>
-      <div class="lines xpts">
-        <div><span class="k">xPts</span> <b>${esc(game.away_team)} ${fmtNum(xAway)}</b></div>
-        <div><span class="k">xPts</span> <b>${esc(game.home_team)} ${fmtNum(xHome)}</b></div>
-      </div>
-      ${aiRaw ? `<div class="ai"><span>AI Pick:</span> ${esc(aiRaw)}</div>` : ''}
-      <div class="picks">
-        ${pickRow(game, 'outright', game.away_team, game.home_team, outrightPickLabel(game.away_team), outrightPickLabel(game.home_team))}
-        ${pickRow(game, 'ats', game.away_team, game.home_team, atsPickLabel(game, game.away_team), atsPickLabel(game, game.home_team))}
-        ${pickRow(game, 'ou', 'over', 'under', ouPickLabel(game, 'over'), ouPickLabel(game, 'under'))}
+      ${cardStatRows(game)}
+      <div class="card-foot">
+        ${aiRaw ? `<div class="ai"><span>AI Pick:</span> ${esc(aiRaw)}</div>` : ''}
+        <div class="picks">
+          ${pickRow(game, 'outright', game.away_team, game.home_team, outrightPickLabel(game.away_team), outrightPickLabel(game.home_team))}
+          ${pickRow(game, 'ats', game.away_team, game.home_team, atsPickLabel(game, game.away_team), atsPickLabel(game, game.home_team))}
+          ${pickRow(game, 'ou', 'over', 'under', ouPickLabel(game, 'over'), ouPickLabel(game, 'under'))}
+        </div>
       </div>
     </article>`;
   }
@@ -698,21 +762,14 @@
     }
   }
 
-  function homeView() {
-    const b = state.bootstrap;
-    const games = (b.games || []).slice().sort((a, c) => new Date(a.kickoff) - new Date(c.kickoff));
-    const board = b.standings || [];
-    return `<div class="grid">
-      <section class="panel">
-        <h1>Week ${b.week} snapshot</h1>
-        <p class="lede">${b.season} season · ${games.length} games · ${b.db ? 'live data' : 'bundled schedule (set DATABASE_URL to persist picks)'}</p>
-        <div class="cards">${games.map(card).join('') || '<p>No games.</p>'}</div>
-      </section>
-      <section class="panel">
-        <h2>Leaderboard</h2>
-        ${standingsTable(board, false)}
-      </section>
-    </div>`;
+  function abbrevKey() {
+    return `<p class="abbrev-key">
+      <span><b>W-L</b> win–loss</span>
+      <span><b>C-F</b> cover–fail (ATS)</span>
+      <span><b>xPts</b> expected points</span>
+      <span><b>ATS</b> against the spread</span>
+      <span><b>OU</b> over/under</span>
+    </p>`;
   }
 
   function weekView() {
@@ -728,6 +785,7 @@
         <div>This week <strong>${fmtInt(strip.week)}</strong></div>
         <div>Locks at kickoff <strong>${fmtInt(strip.locks)}</strong></div>
       </div>
+      ${abbrevKey()}
       <div class="filters">
         <button type="button" class="chip${state.filters.homeDog ? ' on' : ''}" data-filter="homeDog" title="Show home underdogs only">Home underdogs</button>
         <button type="button" class="chip${state.filters.projOver ? ' on' : ''}" data-filter="projOver" title="Show games projected over the total">Projected over</button>
@@ -812,6 +870,34 @@
     return copy;
   }
 
+  function historyGameSortValue(row, key) {
+    if (key === 'gameDate') return row.gameDate || row.kickoff || '';
+    if (key === 'opponent') return row.opponent || '';
+    if (key === 'spread') return row.spread == null ? Number.NEGATIVE_INFINITY : Number(row.spread);
+    if (key === 'restDays') return row.restDays == null ? Number.NEGATIVE_INFINITY : Number(row.restDays);
+    if (key === 'weather') return row.weatherLabel || row.weather || '';
+    if (key === 'distance') return row.distanceZones == null ? Number.NEGATIVE_INFINITY : Number(row.distanceZones);
+    if (key === 'cover') return row.cover || '';
+    if (key === 'roof') return row.roofLabel || row.roof || '';
+    if (key === 'divisional') return row.divisional ? 1 : 0;
+    return row[key] == null ? '' : row[key];
+  }
+
+  function sortedHistoryGameRows(rows) {
+    const { key, dir } = state.historyGameSort;
+    const copy = [...rows];
+    copy.sort((a, b) => {
+      const av = historyGameSortValue(a, key);
+      const bv = historyGameSortValue(b, key);
+      let cmp = 0;
+      if (typeof av === 'string' || typeof bv === 'string') cmp = String(av).localeCompare(String(bv));
+      else cmp = av - bv;
+      if (cmp === 0) cmp = String(a.game_id || '').localeCompare(String(b.game_id || ''));
+      return dir === 'asc' ? cmp : -cmp;
+    });
+    return copy;
+  }
+
   function historyFiltersForm() {
     const f = state.historyFilters;
     const teams = ['ALL', ...(state.bootstrap?.teams || [])];
@@ -871,17 +957,59 @@
     </table></div>`;
   }
 
+  function historyGamesTable(rows) {
+    const cols = [
+      { key: 'gameDate', label: 'Game Date', title: 'Kickoff calendar date' },
+      { key: 'opponent', label: 'Opponent', title: 'Opponent or AWAY @ HOME matchup' },
+      { key: 'spread', label: 'Spread', title: 'Spread line (team-relative when a team is selected)' },
+      { key: 'restDays', label: 'Rest Days', title: 'Days of rest' },
+      { key: 'weather', label: 'Weather', title: 'Weather / roof conditions' },
+      { key: 'distance', label: 'Distance traveled', title: 'Timezone distance traveled' },
+      { key: 'cover', label: 'Cover/Fail', title: 'Spread cover (C), fail (F), or push (P)' },
+      { key: 'roof', label: 'Roof', title: 'Dome, outdoor, or retractable' },
+      { key: 'divisional', label: 'Divisional', title: 'Same-division opponent (Y/N)' }
+    ];
+    const sorted = sortedHistoryGameRows(rows);
+    const { key, dir } = state.historyGameSort;
+    return `<div class="hist-table-wrap"><table class="hist-table hist-games">
+      <thead><tr>${cols.map((c) => {
+        const on = key === c.key;
+        const caret = on ? `<span class="caret">${dir === 'asc' ? '▲' : '▼'}</span>` : '';
+        return `<th data-hist-game-sort="${c.key}" title="${c.title}" class="${on ? 'sorted' : ''}">${c.label}${caret}</th>`;
+      }).join('')}</tr></thead>
+      <tbody>${sorted.map((r) => `<tr>
+        <td>${esc(r.gameDate || '')}</td>
+        <td>${esc(r.opponent || '')}</td>
+        <td>${esc(r.spreadLabel || '—')}</td>
+        <td>${esc(r.restDaysLabel || '—')}</td>
+        <td>${esc(r.weatherLabel || '—')}</td>
+        <td>${esc(r.distanceLabel || '—')}</td>
+        <td>${esc(r.coverLabel || '—')}</td>
+        <td>${esc(r.roofLabel || '—')}</td>
+        <td>${esc(r.divisionalLabel || (r.divisional ? 'Y' : 'N'))}</td>
+      </tr>`).join('')}</tbody>
+    </table></div>`;
+  }
+
   function historyView() {
     let body;
     if (state.historyError) body = `<p class="notice">${state.historyError}</p>`;
     else if (state.historyLoading || !state.history) body = '<p class="hist-loading">Loading history…</p>';
     else {
       const rows = (state.history.rows || []).filter((r) => r && r.games > 0);
-      body = rows.length ? historyTable(rows) : '<p class="hist-empty">No games match these filters</p>';
+      const games = state.history.gameRows || [];
+      const splits = rows.length
+        ? `<div class="hist-block"><h2>Team splits</h2>${historyTable(rows)}</div>`
+        : '';
+      const gameLog = games.length
+        ? `<div class="hist-block"><h2>Games</h2>${historyGamesTable(games)}</div>`
+        : '';
+      body = (splits || gameLog) ? `${splits}${gameLog}` : '<p class="hist-empty">No games match these filters</p>';
     }
     return `<section>
       <h1>History</h1>
       <p class="lede">Team performance splits · schedule seed (not your wager ledger)</p>
+      ${abbrevKey()}
       ${historyFiltersForm()}
       ${body}
     </section>`;
@@ -922,11 +1050,10 @@
       app.innerHTML = '<p>Loading…</p>';
       return;
     }
-    if (state.page === 'home') app.innerHTML = homeView();
-    else if (state.page === 'week') app.innerHTML = weekView();
+    if (state.page === 'week') app.innerHTML = weekView();
     else if (state.page === 'standings') app.innerHTML = `<section class="panel"><h1>Standings</h1>${standingsTable((state.standings && state.standings.standings) || state.bootstrap.standings || [], true)}</section>`;
     else if (state.page === 'history') app.innerHTML = historyView();
-    else app.innerHTML = homeView();
+    else app.innerHTML = weekView();
 
     app.onclick = async (e) => {
       const chip = e.target.closest('[data-filter]');
@@ -951,6 +1078,14 @@
         const key = histSort.dataset.histSort;
         if (state.historySort.key === key) state.historySort.dir = state.historySort.dir === 'asc' ? 'desc' : 'asc';
         else state.historySort = { key, dir: key === 'team' ? 'asc' : 'desc' };
+        render();
+        return;
+      }
+      const histGameSort = e.target.closest('th[data-hist-game-sort]');
+      if (histGameSort && state.page === 'history') {
+        const key = histGameSort.dataset.histGameSort;
+        if (state.historyGameSort.key === key) state.historyGameSort.dir = state.historyGameSort.dir === 'asc' ? 'desc' : 'asc';
+        else state.historyGameSort = { key, dir: key === 'gameDate' ? 'desc' : 'asc' };
         render();
         return;
       }

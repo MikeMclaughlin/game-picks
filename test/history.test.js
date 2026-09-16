@@ -10,7 +10,8 @@ const {
   roofBucket,
   roleForTeam,
   teamHistory,
-  historyPayload
+  historyPayload,
+  gameLogRows
 } = require('../src/history');
 const { sameDivision, distanceBucket, teamDivision } = require('../src/teams');
 
@@ -117,6 +118,71 @@ test('historyPayload reports supported filters and empty rows when none match', 
   assert.equal(payload.ok, true);
   assert.equal(payload.matchedGames, 0);
   assert.equal(payload.rows.length, 0);
+  assert.equal(payload.gameRows.length, 0);
   assert.equal(payload.supported.division, true);
+  assert.equal(payload.supported.gameDate, true);
+  assert.equal(payload.supported.divisional, true);
   assert.ok(payload.notes.distance);
+});
+
+test('history game log includes date, opponent, spread, rest, weather, distance, cover, roof, divisional', () => {
+  const games = [
+    game({
+      game_id: 'div',
+      home_team: 'BUF',
+      away_team: 'MIA',
+      gameday: '2024-09-08',
+      kickoff: '2024-09-08T17:00:00Z',
+      spread_line: 3,
+      home_rest: 7,
+      away_rest: 4,
+      roof: 'outdoors',
+      temp: 32,
+      wind: 4,
+      home_score: 21,
+      away_score: 14
+    }),
+    game({
+      game_id: 'cross',
+      home_team: 'BUF',
+      away_team: 'SEA',
+      gameday: '2024-09-15',
+      kickoff: '2024-09-15T17:00:00Z',
+      spread_line: 6,
+      home_rest: 7,
+      away_rest: 7,
+      roof: 'dome',
+      temp: null,
+      wind: null,
+      home_score: 10,
+      away_score: 24
+    })
+  ];
+  const sea = gameLogRows(games, parseHistoryFilters({ team: 'SEA', from: 2024, to: 2024 }));
+  assert.equal(sea.length, 1);
+  assert.equal(sea[0].gameDate, '2024-09-15');
+  assert.equal(sea[0].opponent, '@ BUF');
+  assert.equal(sea[0].spreadLabel, '+6');
+  assert.equal(sea[0].restDays, 7);
+  assert.equal(sea[0].weatherLabel, 'Dome');
+  assert.match(sea[0].distanceLabel, /tz east/);
+  assert.equal(sea[0].cover, 'C');
+  assert.equal(sea[0].coverLabel, 'C');
+  assert.equal(sea[0].roof, 'dome');
+  assert.equal(sea[0].divisional, false);
+  assert.equal(sea[0].divisionalLabel, 'N');
+
+  const mia = gameLogRows(games, parseHistoryFilters({ team: 'MIA', from: 2024, to: 2024 }));
+  assert.equal(mia.length, 1);
+  assert.equal(mia[0].opponent, '@ BUF');
+  assert.equal(mia[0].divisional, true);
+  assert.equal(mia[0].divisionalLabel, 'Y');
+  assert.equal(mia[0].cover, 'F');
+  assert.equal(mia[0].restDays, 4);
+  assert.match(mia[0].weatherLabel, /Cold/);
+  assert.equal(mia[0].distanceLabel, '0 tz');
+
+  const all = historyPayload(games, parseHistoryFilters({ from: 2024, to: 2024 }));
+  assert.equal(all.gameRows.length, 2);
+  assert.equal(all.gameRows[0].opponent.includes('@'), true);
 });

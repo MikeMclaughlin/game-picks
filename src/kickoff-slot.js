@@ -32,8 +32,8 @@ function weekdayCode(game, parts) {
 }
 
 /**
- * NFL kickoff window shade, light → dark:
- * Thursday night, Sunday ~1pm, Sunday ~4pm, Sunday night, Monday night.
+ * NFL kickoff window shade, light → dark across the week:
+ * Wednesday, Thursday, Saturday, Sunday ~1pm, Sunday ~4pm, Sunday night, Monday night.
  */
 function kickoffSlot(game) {
   const iso = typeof game === 'string' ? game : game && game.kickoff;
@@ -42,7 +42,9 @@ function kickoffSlot(game) {
   const wd = weekdayCode(obj, parts);
   const minutes = parts && parts.hour != null ? parts.hour * 60 + parts.minute : null;
 
-  if (wd === 'THU' || wd === 'WED') return 'slot-thu';
+  if (wd === 'WED') return 'slot-wed';
+  if (wd === 'THU') return 'slot-thu';
+  if (wd === 'SAT' || wd === 'FRI') return 'slot-sat';
   if (wd === 'MON' || wd === 'TUE') return 'slot-mon';
 
   if (minutes != null && minutes >= 19 * 60) return 'slot-sun-n';

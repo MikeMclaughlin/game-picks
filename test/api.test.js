@@ -96,7 +96,8 @@ test('/api/bootstrap returns JSON week payload', async () => {
     assert.equal(Object.prototype.hasOwnProperty.call(g.home, 'lastFiveAts'), true);
     assert.equal(Object.prototype.hasOwnProperty.call(g.home, 'showRest'), true);
     assert.equal(Object.prototype.hasOwnProperty.call(g.away, 'shortRestWinPct'), true);
-    assert.match(String(g.kickoffSlot || ''), /^slot-(thu|sun-1|sun-4|sun-n|mon)$/);
+    assert.equal(Object.prototype.hasOwnProperty.call(g.away, 'restWinPct'), true);
+    assert.match(String(g.kickoffSlot || ''), /^slot-(wed|thu|sat|sun-1|sun-4|sun-n|mon)$/);
   }
   server.close();
 });
@@ -110,6 +111,18 @@ test('/api/history supports filter query params', async () => {
   assert.equal(all.ok, true);
   assert.ok(Array.isArray(all.rows));
   assert.ok(all.rows.length > 0);
+  assert.ok(Array.isArray(all.gameRows));
+  assert.ok(all.gameRows.length > 0);
+  const sampleGame = all.gameRows[0];
+  assert.equal(Object.prototype.hasOwnProperty.call(sampleGame, 'gameDate'), true);
+  assert.equal(Object.prototype.hasOwnProperty.call(sampleGame, 'opponent'), true);
+  assert.equal(Object.prototype.hasOwnProperty.call(sampleGame, 'spreadLabel'), true);
+  assert.equal(Object.prototype.hasOwnProperty.call(sampleGame, 'restDaysLabel'), true);
+  assert.equal(Object.prototype.hasOwnProperty.call(sampleGame, 'weatherLabel'), true);
+  assert.equal(Object.prototype.hasOwnProperty.call(sampleGame, 'distanceLabel'), true);
+  assert.equal(Object.prototype.hasOwnProperty.call(sampleGame, 'coverLabel'), true);
+  assert.equal(Object.prototype.hasOwnProperty.call(sampleGame, 'roofLabel'), true);
+  assert.equal(Object.prototype.hasOwnProperty.call(sampleGame, 'divisionalLabel'), true);
   assert.equal(all.supported.site, true);
   const unfilteredG = all.rows.find((r) => r.team === 'SEA')?.games;
 
@@ -160,26 +173,37 @@ test('/api/history supports filter query params', async () => {
 
   const html = await fetch(`http://127.0.0.1:${port}/`);
   const page = await html.text();
-  assert.match(page, /styles\.css\?v=week-ui-3/);
-  assert.match(page, /app\.js\?v=week-ui-3/);
+  assert.match(page, /styles\.css\?v=week-ui-4/);
+  assert.match(page, /app\.js\?v=week-ui-4/);
   const appJs = await fetch(`http://127.0.0.1:${port}/app.js`);
   const script = await appJs.text();
   assert.match(script, /function atsPickLabel/);
   assert.match(script, /function outrightPickLabel/);
   assert.match(script, /function ouPickLabel/);
   assert.match(script, /function exclusivePartner/);
-  assert.match(script, /Last 5:/);
-  assert.match(script, /ATS 5:/);
+  assert.match(script, /Last 5 games/);
+  assert.match(script, /Last 5 ATS/);
   assert.match(script, /lastGame\.label/);
   assert.match(script, /Number\(rest\) !== 7/);
+  assert.match(script, /n === 8/);
   assert.match(script, /function kickoffSlotClass/);
+  assert.match(script, /slot-wed/);
+  assert.match(script, /slot-sat/);
+  assert.match(script, /abbrev-key/);
+  assert.match(script, /card-foot/);
+  assert.match(script, /Win % Rest/);
+  assert.match(script, /data-hist-game-sort/);
   assert.match(script, /pickRow\(game, 'ats', game\.away_team, game\.home_team, atsPickLabel/);
   assert.match(script, /data-sel="\$\{esc\(left\)\}"/);
   assert.match(script, /outrightPickLabel\(game\.away_team\)/);
   assert.match(script, /ouPickLabel\(game, 'over'\)/);
+  assert.doesNotMatch(script, /function homeView/);
   assert.doesNotMatch(script, /function rulesView/);
   assert.doesNotMatch(script, /oauth_apple/);
   assert.match(page, /Social Media sign in/);
+  assert.match(page, />Home</);
+  assert.doesNotMatch(page, /data-page="home"/);
+  assert.doesNotMatch(page, />Current Week</);
   assert.doesNotMatch(page, /data-page="rules"/);
   assert.doesNotMatch(page, /oauth_apple/);
   assert.doesNotMatch(page, />Apple</);
@@ -187,6 +211,12 @@ test('/api/history supports filter query params', async () => {
   assert.match(page, /btn-sign-in/);
   assert.match(page, /Auth not configured/);
   assert.match(page, /__CLERK_CONFIG__/);
+  const css = await fetch(`http://127.0.0.1:${port}/styles.css`);
+  const cssText = await css.text();
+  assert.match(cssText, /\.picks \{ display: grid; gap: 5px; margin-top: auto; \}/);
+  assert.match(cssText, /padding: 2px 0 2px 0px;/);
+  assert.match(cssText, /\.card\.slot-wed/);
+  assert.match(cssText, /\.card\.slot-sat/);
 
   server.close();
 });
