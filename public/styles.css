@@ -73,25 +73,30 @@ h1, h2 { margin: 0 0 8px; font-size: 22px; font-weight: 700; letter-spacing: 0.0
 .grid { display: grid; grid-template-columns: 1.4fr 1fr; gap: 12px; }
 .panel { background: var(--bg2); border: 1px solid var(--line); border-radius: 6px; padding: 10px; }
 .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 8px; }
-.week-cards { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
-.week-cards .card-head { font-size: 13px; }
+.week-cards { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; align-items: stretch; }
+.week-cards .card, .week-cards .matchup {
+  height: 100%;
+  min-height: 0;
+}
+.week-cards .card-head { font-size: 15px; }
 .week-cards .city { font-size: clamp(18px, 1.9vw, 24px); }
-.week-cards .role { font-size: 11px; }
-.week-cards .side-stat, .week-cards .stat { font-size: 13px; line-height: 1.4; }
-.week-cards .lines { font-size: 14px; }
-.week-cards .ai { font-size: 13px; }
-.week-cards .pick { grid-template-columns: 78px 1fr 1fr; gap: 7px; }
-.week-cards .pick label { font-size: 12px; }
-.week-cards .pick button { font-size: 14px; padding: 7px 8px; }
+.week-cards .vs { font-size: 16px; padding-top: 6px; }
+.week-cards .side-stat, .week-cards .stat, .week-cards .stat-lab { font-size: 15px; line-height: 1.4; }
+.week-cards .ai { font-size: 15px; }
+.week-cards .pick { grid-template-columns: 88px 1fr 1fr; gap: 8px; }
+.week-cards .pick label { font-size: 13px; }
+.week-cards .pick button { font-size: 16px; padding: 8px 10px; }
 .card, .matchup {
   background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px;
   display: flex; flex-direction: column; gap: 8px;
 }
-.card.slot-thu { background: #242424; border-color: #4a4a4a; }
-.card.slot-sun-1 { background: #1c1c1c; border-color: #3a3a3a; }
-.card.slot-sun-4 { background: #151515; border-color: #2e2e2e; }
-.card.slot-sun-n { background: #101010; border-color: #262626; }
-.card.slot-mon { background: #0b0b0b; border-color: #1c1c1c; }
+.card.slot-wed { background: #3a3a3a; border-color: #5c5c5c; }
+.card.slot-thu { background: #2e2e2e; border-color: #4e4e4e; }
+.card.slot-sat { background: #242424; border-color: #424242; }
+.card.slot-sun-1 { background: #1c1c1c; border-color: #363636; }
+.card.slot-sun-4 { background: #141414; border-color: #2c2c2c; }
+.card.slot-sun-n { background: #0d0d0d; border-color: #202020; }
+.card.slot-mon { background: #070707; border-color: #141414; }
 .card.locked { opacity: 0.82; }
 .card-head {
   display: flex; justify-content: space-between; align-items: baseline;
@@ -111,7 +116,24 @@ h1, h2 { margin: 0 0 8px; font-size: 22px; font-weight: 700; letter-spacing: 0.0
 .side-stats { display: flex; flex-direction: column; gap: 1px; margin-top: 4px; }
 .side-stat, .stat { font-size: 11px; color: var(--text); line-height: 1.35; }
 .side-stat.muted, .stat { color: var(--muted); }
+.side-stat.muted {
+  padding: 2px 0 2px 0px;
+}
 .side-stat.alert, .stat.short { color: var(--red); font-weight: 700; }
+.stat-rows { display: flex; flex-direction: column; gap: 1px; }
+.stat-row {
+  display: grid; grid-template-columns: 1fr auto 1fr; gap: 8px; align-items: center;
+}
+.stat-lab {
+  color: var(--muted); text-align: center; font-weight: 500; white-space: nowrap; padding: 0 4px;
+}
+.stat-row .side-stat.home { text-align: right; }
+.card-foot {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
 .vs { color: var(--muted); font-size: 14px; padding-top: 4px; font-weight: 700; }
 .lines {
   display: flex; justify-content: space-between; gap: 8px;
@@ -125,7 +147,8 @@ h1, h2 { margin: 0 0 8px; font-size: 22px; font-weight: 700; letter-spacing: 0.0
   padding: 6px 8px; font-size: 12px; text-align: center; color: var(--text);
 }
 .ai span { color: var(--gold); font-weight: 700; }
-.picks { display: grid; gap: 5px; }
+.picks { display: grid; gap: 5px; margin-top: auto; }
+.week-cards .picks { margin-top: auto; }
 .pick { display: grid; grid-template-columns: 72px 1fr 1fr; gap: 6px; align-items: center; }
 .pick label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
 .pick button {
@@ -150,6 +173,13 @@ h1, h2 { margin: 0 0 8px; font-size: 22px; font-weight: 700; letter-spacing: 0.0
 }
 .week-stats strong { display: inline; color: var(--text); font-size: 18px; margin-left: 8px; font-weight: 800; }
 .week-stats strong.gold { color: var(--gold); }
+.abbrev-key {
+  display: flex; flex-wrap: wrap; gap: 6px 16px;
+  color: var(--muted); font-size: 12px; margin: 0 0 12px;
+  padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px;
+  background: var(--bg2);
+}
+.abbrev-key b { color: var(--gold); font-weight: 700; }
 table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
 th, td { text-align: left; padding: 6px 7px; border-bottom: 1px solid var(--line); }
 th { color: var(--muted); font-weight: 600; cursor: pointer; user-select: none; }
@@ -191,6 +221,9 @@ th .caret { color: var(--gold); font-size: 10px; margin-left: 4px; }
 .hist-empty, .hist-loading { color: var(--muted); padding: 18px 4px; }
 .hist-table-wrap { overflow-x: auto; }
 .hist-table th { color: var(--gold); font-weight: 700; }
+.hist-table.hist-games th, .hist-table.hist-games td { white-space: nowrap; }
+.hist-block { margin: 0 0 18px; }
+.hist-block h2 { font-size: 16px; margin: 0 0 8px; }
 
 @media (max-width: 1100px) {
   .week-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }

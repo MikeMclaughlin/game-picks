@@ -54,13 +54,32 @@ function lastGameInfo(team, prev) {
   const oppScore = prev.home_team === t ? toNumber(prev.away_score) : toNumber(prev.home_score);
   const result = letter === 'W' ? 'Win' : letter === 'L' ? 'Loss' : 'Tie';
   const margin = teamScore != null && oppScore != null ? Math.abs(teamScore - oppScore) : null;
-  const label = letter === 'T' || margin == null ? result : `${result} by ${margin}`;
-  return { letter, result, opponent, teamScore, oppScore, margin, label };
+  const signed = letter === 'W' && margin != null
+    ? `+${margin}`
+    : (letter === 'L' && margin != null ? `-${margin}` : null);
+  const label = letter === 'T' || margin == null || !signed
+    ? result
+    : (letter === 'W' ? `WIN ${signed}` : `Loss ${signed}`);
+  return { letter, result, opponent, teamScore, oppScore, margin, signed, label };
 }
 
 function showRestDays(rest) {
   const n = toNumber(rest);
   return n != null && n !== 7;
+}
+
+function showRestWinPct(rest) {
+  const n = toNumber(rest);
+  return n != null && n !== 7 && n !== 8;
+}
+
+function restAmountWinPct(games, team, rest) {
+  const n = toNumber(rest);
+  if (!showRestWinPct(n)) return null;
+  return winPct(games, team, (g, t) => {
+    const d = g.home_team === t ? toNumber(g.home_rest) : toNumber(g.away_rest);
+    return d != null && d === n;
+  });
 }
 
 function priorScoredGames(history, team, beforeKickoff) {
@@ -221,12 +240,14 @@ function sideContext(game, side, history) {
     const d = g.home_team === t ? toNumber(g.home_rest) : toNumber(g.away_rest);
     return d != null && d <= SHORT_REST_DAYS;
   });
+  const restPct = restAmountWinPct(games, team, rest);
   const ctx = {
     team,
     city: teamCity(team),
     side,
     rest,
     showRest: showRestDays(rest),
+    showRestWinPct: showRestWinPct(rest),
     short,
     last,
     lastGame: lastGameInfo(team, prev),
@@ -234,7 +255,8 @@ function sideContext(game, side, history) {
     lastFiveAts: lastFiveAts(history, team, game.kickoff),
     homeWinPct: homePct,
     awayWinPct: awayPct,
-    shortRestWinPct: short ? shortPct : null
+    shortRestWinPct: short ? shortPct : null,
+    restWinPct: restPct
   };
   if (side === 'away') {
     const travel = roadTravel(game.away_team, game.home_team);
@@ -320,6 +342,8 @@ module.exports = {
   previousGame,
   lastGameInfo,
   showRestDays,
+  showRestWinPct,
+  restAmountWinPct,
   lastFiveOutright,
   lastFiveAts,
   lastFiveLetters,

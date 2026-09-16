@@ -2,7 +2,7 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { impliedPoints, projectGame, formatAtsPick, currentSeasonWeek, enrichGame, lastGameInfo, showRestDays, lastFiveOutright, lastFiveAts } = require('../src/week-view');
+const { impliedPoints, projectGame, formatAtsPick, currentSeasonWeek, enrichGame, lastGameInfo, showRestDays, showRestWinPct, restAmountWinPct, lastFiveOutright, lastFiveAts } = require('../src/week-view');
 const { roadTravel, teamCity } = require('../src/teams');
 const { UPSERT_SQL } = require('../src/nfl-data');
 
@@ -67,7 +67,7 @@ test('teamCity uses market names for two-city clubs', () => {
   assert.equal(teamCity('LA'), 'LA Rams');
 });
 
-test('lastGameInfo reports Win/Loss plus margin of victory or defeat', () => {
+test('lastGameInfo reports WIN +margin / Loss -margin', () => {
   const prev = {
     home_team: 'DET',
     away_team: 'TB',
@@ -81,11 +81,13 @@ test('lastGameInfo reports Win/Loss plus margin of victory or defeat', () => {
   assert.equal(info.teamScore, 27);
   assert.equal(info.oppScore, 20);
   assert.equal(info.margin, 7);
-  assert.equal(info.label, 'Win by 7');
+  assert.equal(info.signed, '+7');
+  assert.equal(info.label, 'WIN +7');
   const loss = lastGameInfo('TB', prev);
   assert.equal(loss.result, 'Loss');
   assert.equal(loss.margin, 7);
-  assert.equal(loss.label, 'Loss by 7');
+  assert.equal(loss.signed, '-7');
+  assert.equal(loss.label, 'Loss -7');
   const tie = lastGameInfo('DET', { ...prev, home_score: 20, away_score: 20 });
   assert.equal(tie.result, 'Tie');
   assert.equal(tie.label, 'Tie');
@@ -97,6 +99,23 @@ test('showRestDays hides exactly 7 days of rest', () => {
   assert.equal(showRestDays(4), true);
   assert.equal(showRestDays(8), true);
   assert.equal(showRestDays(null), false);
+});
+
+test('rest-amount win% shows when rest is not 7 or 8', () => {
+  assert.equal(showRestWinPct(7), false);
+  assert.equal(showRestWinPct(8), false);
+  assert.equal(showRestWinPct(4), true);
+  assert.equal(showRestWinPct(6), true);
+  assert.equal(showRestWinPct(10), true);
+  assert.equal(showRestWinPct(null), false);
+  const games = [
+    { home_team: 'DET', away_team: 'CHI', home_score: 21, away_score: 10, home_rest: 4, away_rest: 7 },
+    { home_team: 'GB', away_team: 'DET', home_score: 24, away_score: 17, home_rest: 7, away_rest: 4 },
+    { home_team: 'DET', away_team: 'MIN', home_score: 14, away_score: 20, home_rest: 7, away_rest: 7 }
+  ];
+  assert.equal(restAmountWinPct(games, 'DET', 4), 0.5);
+  assert.equal(restAmountWinPct(games, 'DET', 7), null);
+  assert.equal(restAmountWinPct(games, 'DET', 8), null);
 });
 
 test('enrichGame exposes lastGame, city, short rest, and xPts from the line', () => {
@@ -143,9 +162,9 @@ test('enrichGame exposes lastGame, city, short rest, and xPts from the line', ()
   assert.equal(card.home.city, 'Buffalo');
   assert.equal(card.away.lastGame.result, 'Win');
   assert.equal(card.away.lastGame.margin, 7);
-  assert.equal(card.away.lastGame.label, 'Win by 7');
+  assert.equal(card.away.lastGame.label, 'WIN +7');
   assert.equal(card.home.lastGame.result, 'Loss');
-  assert.equal(card.home.lastGame.label, 'Loss by 11');
+  assert.equal(card.home.lastGame.label, 'Loss -11');
   assert.equal(card.away.showRest, true);
   assert.equal(card.home.showRest, true);
   assert.equal(card.away.short, true);
@@ -155,6 +174,9 @@ test('enrichGame exposes lastGame, city, short rest, and xPts from the line', ()
   assert.equal(card.xPts.away, 24.5);
   assert.equal(card.xPts.home, 30);
   assert.equal(card.home.shortRestWinPct, null);
+  assert.equal(card.away.showRestWinPct, true);
+  assert.equal(card.home.showRestWinPct, true);
+  assert.equal(Object.prototype.hasOwnProperty.call(card.away, 'restWinPct'), true);
   assert.equal(card.kickoffSlot, 'slot-thu');
 });
 

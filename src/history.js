@@ -1,8 +1,8 @@
 'use strict';
 
-const { roadTravel, distanceBucket, sameDivision } = require('./teams');
-const { toNumber, scoresReady } = require('./grader');
-const { resultLetter } = require('./week-view');
+const { roadTravel, distanceBucket, sameDivision, tzIndex } = require('./teams');
+const { toNumber, scoresReady, atsLetter } = require('./grader');
+const { resultLetter, formatLine } = require('./week-view');
 
 const DEFAULT_FROM = 2016;
 const DEFAULT_TO = 2026;
@@ -32,7 +32,14 @@ const NOTES = {
   roof: 'nflverse roof: dome; outdoors; retractable = open|closed.',
   role: 'Favorite/underdog from spread_line (positive means home favored). Pick’em and missing lines are excluded.',
   division: 'Static current NFL division map on team abbreviations (not a schedule feed field).',
-  daysOff: 'Uses home_rest/away_rest: short ≤5 days, bye+ ≥11, else normal.'
+  daysOff: 'Uses home_rest/away_rest: short ≤5 days, bye+ ≥11, else normal.',
+  gameDate: 'Kickoff calendar date (gameday, else kickoff in ET).',
+  opponent: 'Team-relative opponent when a team is selected; otherwise the AWAY @ HOME matchup.',
+  spread: 'Team-relative signed spread when a team is selected; otherwise home-favored line.',
+  restDays: 'Team rest when a team is selected; otherwise away / home rest.',
+  distance: 'Timezone-based distance traveled by the road team (or the selected team).',
+  cover: 'Spread cover (C), fail (F), or push (P). Team-relative when a team is selected.',
+  divisional: 'Y if both clubs share the current static NFL division map.'
 };
 
 function isByeBefore(games, team, kickoff) {
@@ -103,6 +110,166 @@ function ouResult(game) {
   const line = toNumber(game.total_line);
   if (total === line) return 'P';
   return total > line ? 'O' : 'U';
+}
+
+function weatherLabel(game) {
+  const roof = roofBucket(game);
+  const bucket = weatherBucket(game);
+  const temp = toNumber(game.temp);
+  const wind = toNumber(game.wind);
+  const bits = [];
+  if (bucket === 'cold') bits.push('Cold');
+  else if (bucket === 'windy') bits.push('Windy');
+  else if (roof === 'dome') bits.push('Dome');
+  else if (roof === 'retractable') bits.push(game.roof === 'open' ? 'Retractable open' : 'Retractable closed');
+  else if (roof === 'outdoor') bits.push('Outdoor');
+  else bits.push(game.roof || '—');
+  if (roof !== 'dome' && temp != null) bits.push(`${Math.round(temp)}°F`);
+  if (roof !== 'dome' && wind != null) bits.push(`${Math.round(wind)} mph`);
+  return bits.join(' ').replace(/\s+/g, ' ').trim() || '—';
+}
+
+function gameDateValue(game) {
+  if (game.gameday) return String(game.gameday);
+  const iso = game.kickoff;
+  const d = iso instanceof Date ? iso : new Date(iso);
+  if (!Number.isFinite(d.getTime())) return '';
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/New_York',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).formatToParts(d);
+  const get = (type) => {
+    const row = parts.find((p) => p.type === type);
+    return row ? row.value : '';
+  };
+  return [get('year'), get('month'), get('day')].filter(Boolean).join('-');
+}
+
+function signedSpreadForTeam(game, team) {
+  const spread = toNumber(game.spread_line);
+  if (spread == null) return null;
+  const line = team === game.home_team ? -spread : spread;
+  const shown = formatLine(line);
+  if (shown == null) return null;
+  return line > 0 ? `+${shown}` : shown;
+}
+
+function spreadLabelForRow(game, team) {
+  if (team) return signedSpreadForTeam(game, team);
+  const spread = toNumber(game.spread_line);
+  if (spread == null) return null;
+  if (spread === 0) return 'PICK';
+  const fav = spread > 0 ? game.home_team : game.away_team;
+  const abs = formatLine(Math.abs(spread));
+  return abs == null ? null : `${fav} -${abs}`;
+}
+
+function distanceTraveled(game, team) {
+  const focus = team || game.away_team;
+  const isHome = Boolean(team) && game.home_team === focus && game.location !== 'Neutral';
+  if (isHome) {
+    return { bucket: 'home', zones: 0, dir: null, label: '0 (home)' };
+  }
+  const zones = Math.abs(tzIndex(game.away_team) - tzIndex(game.home_team));
+  const travel = roadTravel(game.away_team, game.home_team);
+  const bucket = distanceBucket(game.away_team, game.home_team);
+  if (travel) {
+    return { bucket: 'cross', zones: travel.zones, dir: travel.dir, label: `${travel.zones} tz ${travel.dir}` };
+  }
+  return { bucket, zones, dir: null, label: `${zones} tz` };
+}
+
+function restDaysForRow(game, team) {
+  if (team) {
+    const n = game.home_team === team ? toNumber(game.home_rest) : toNumber(game.away_rest);
+    return { value: n, label: n == null ? '—' : String(n) };
+  }
+  const away = toNumber(game.away_rest);
+  const home = toNumber(game.home_rest);
+  const bits = [away == null ? '—' : String(away), home == null ? '—' : String(home)];
+  return { value: away, away, home, label: bits.join(' / ') };
+}
+
+function coverForRow(game, team) {
+  if (team) {
+    const letter = atsLetter(game, team);
+    return { letter, label: letter || '—' };
+  }
+  const homeLetter = atsLetter(game, game.home_team);
+  if (homeLetter === 'P') return { letter: 'P', label: 'P' };
+  if (homeLetter === 'C') return { letter: 'C', label: `${game.home_team} C` };
+  if (homeLetter === 'F') return { letter: 'F', label: `${game.away_team} C` };
+  return { letter: null, label: '—' };
+}
+
+function opponentForRow(game, team) {
+  if (!team) {
+    return { opponent: `${game.away_team} @ ${game.home_team}`, site: 'matchup' };
+  }
+  const isHome = game.home_team === team;
+  const opp = isHome ? game.away_team : game.home_team;
+  return { opponent: isHome ? `vs ${opp}` : `@ ${opp}`, site: isHome ? 'home' : 'road' };
+}
+
+function gameLogRow(game, team) {
+  const opp = opponentForRow(game, team);
+  const rest = restDaysForRow(game, team);
+  const dist = distanceTraveled(game, team);
+  const cover = coverForRow(game, team);
+  const divisional = sameDivision(game.home_team, game.away_team);
+  const spreadNum = team
+    ? (toNumber(game.spread_line) == null ? null : (team === game.home_team ? -toNumber(game.spread_line) : toNumber(game.spread_line)))
+    : toNumber(game.spread_line);
+  return {
+    game_id: game.game_id,
+    season: game.season,
+    week: game.week,
+    gameDate: gameDateValue(game),
+    kickoff: game.kickoff,
+    team: team || null,
+    opponent: opp.opponent,
+    site: opp.site,
+    spread: spreadNum,
+    spreadLabel: spreadLabelForRow(game, team) || '—',
+    restDays: rest.value,
+    restDaysLabel: rest.label,
+    weather: weatherBucket(game),
+    weatherLabel: weatherLabel(game),
+    distance: dist.bucket,
+    distanceZones: dist.zones,
+    distanceLabel: dist.label,
+    cover: cover.letter,
+    coverLabel: cover.label,
+    roof: roofBucket(game),
+    roofLabel: roofBucket(game) === 'unknown' ? (game.roof || '—') : roofBucket(game),
+    divisional,
+    divisionalLabel: divisional ? 'Y' : 'N'
+  };
+}
+
+function gameLogRows(games, filters) {
+  const team = filters.team && filters.team !== 'ALL' ? filters.team : null;
+  const globalGames = games.filter((g) => matchesGlobalFilters(g, filters) && scoresReady(g));
+  const rows = [];
+  for (const g of globalGames) {
+    if (team) {
+      if (!matchesTeamFilters(g, team, filters)) continue;
+      rows.push(gameLogRow(g, team));
+    } else {
+      if (filters.travel === 'east' || filters.travel === 'west') {
+        const t = roadTravel(g.away_team, g.home_team);
+        if (!t || t.dir !== filters.travel) continue;
+      }
+      if (filters.distance === 'local' || filters.distance === 'cross') {
+        if (distanceBucket(g.away_team, g.home_team) !== filters.distance) continue;
+      }
+      rows.push(gameLogRow(g, null));
+    }
+  }
+  rows.sort((a, b) => String(b.gameDate).localeCompare(String(a.gameDate)) || String(a.game_id).localeCompare(String(b.game_id)));
+  return rows;
 }
 
 function record(wins, losses, pushes = 0) {
@@ -352,6 +519,7 @@ function teamHistory(games, teamFilter, options = {}) {
 function historyPayload(games, filters) {
   const seasons = [...new Set(games.map((g) => Number(g.season)).filter(Number.isFinite))].sort((a, b) => a - b);
   const result = teamHistory(games, filters.team, { filters, lookupGames: games });
+  const gameRows = gameLogRows(games, filters);
   return {
     ok: true,
     fromSeason: filters.from,
@@ -362,6 +530,7 @@ function historyPayload(games, filters) {
     matchedGames: result.matchedGames,
     teams: result.teams,
     rows: result.rows,
+    gameRows,
     notes: NOTES,
     supported: {
       team: true,
@@ -374,7 +543,13 @@ function historyPayload(games, filters) {
       roof: true,
       role: true,
       division: true,
-      daysOff: true
+      daysOff: true,
+      gameDate: true,
+      opponent: true,
+      spread: true,
+      restDays: true,
+      cover: true,
+      divisional: true
     }
   };
 }
@@ -392,6 +567,9 @@ module.exports = {
   matchesTeamFilters,
   roleForTeam,
   historyPayload,
+  gameLogRows,
+  gameLogRow,
+  weatherLabel,
   FILTER_DEFAULTS,
   NOTES
 };
