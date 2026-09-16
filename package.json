@@ -1,0 +1,20 @@
+{
+  "name": "game-picks",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Season-long NFL pick-em (outright, ATS, over/under). Not a survivor pool.",
+  "engines": {
+    "node": ">=18"
+  },
+  "main": "server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "migrate": "node scripts/migrate.js",
+    "import": "node scripts/import-games.js",
+    "grade-all": "node scripts/grade-all.js",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "@neondatabase/serverless": "^1.0.2"
+  }
+}
