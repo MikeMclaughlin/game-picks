@@ -68,6 +68,40 @@ function lineForMarket(game, market) {
   return null;
 }
 
+function exclusivePartner(market) {
+  if (market === 'outright') return 'ats';
+  if (market === 'ats') return 'outright';
+  return null;
+}
+
+function assertExclusivePicks(picks) {
+  const selected = new Map();
+  for (const pick of picks || []) {
+    if (!pick || !pick.game_id) continue;
+    if (pick.selection == null || pick.selection === '') continue;
+    const market = String(pick.market || '').toLowerCase();
+    if (market !== 'outright' && market !== 'ats') continue;
+    const prev = selected.get(pick.game_id);
+    if (prev && prev !== market) {
+      const err = new Error('OUTRIGHT and ATS cannot both be picked on the same game');
+      err.statusCode = 409;
+      throw err;
+    }
+    selected.set(pick.game_id, market);
+  }
+  return true;
+}
+
+function atsLetter(game, team) {
+  if (!scoresReady(game) || toNumber(game.spread_line) == null) return null;
+  const t = String(team || '').toUpperCase();
+  const margin = toNumber(game.home_score) - toNumber(game.away_score);
+  const spread = toNumber(game.spread_line);
+  if (margin === spread) return 'P';
+  const coverTeam = margin > spread ? game.home_team : game.away_team;
+  return coverTeam === t ? 'C' : 'F';
+}
+
 function validatePick(game, market, selection, now = Date.now()) {
   if (!game) {
     const err = new Error('Game not found');
@@ -180,5 +214,8 @@ module.exports = {
   isLocked,
   kickoffMs,
   validatePick,
-  gradeAll
+  gradeAll,
+  exclusivePartner,
+  assertExclusivePicks,
+  atsLetter
 };

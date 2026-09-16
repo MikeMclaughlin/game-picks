@@ -1,7 +1,7 @@
 'use strict';
 
 const { roadTravel, teamAbbr, teamCity } = require('./teams');
-const { toNumber, scoresReady, isLocked } = require('./grader');
+const { toNumber, scoresReady, isLocked, atsLetter } = require('./grader');
 const { kickoffSlot } = require('./kickoff-slot');
 
 const SHORT_REST_DAYS = 5;
@@ -53,7 +53,46 @@ function lastGameInfo(team, prev) {
   const teamScore = prev.home_team === t ? toNumber(prev.home_score) : toNumber(prev.away_score);
   const oppScore = prev.home_team === t ? toNumber(prev.away_score) : toNumber(prev.home_score);
   const result = letter === 'W' ? 'Win' : letter === 'L' ? 'Loss' : 'Tie';
-  return { letter, result, opponent, teamScore, oppScore };
+  const margin = teamScore != null && oppScore != null ? Math.abs(teamScore - oppScore) : null;
+  const label = letter === 'T' || margin == null ? result : `${result} by ${margin}`;
+  return { letter, result, opponent, teamScore, oppScore, margin, label };
+}
+
+function showRestDays(rest) {
+  const n = toNumber(rest);
+  return n != null && n !== 7;
+}
+
+function priorScoredGames(history, team, beforeKickoff) {
+  const t = teamAbbr(team);
+  const before = Date.parse(beforeKickoff);
+  return (history || [])
+    .filter((g) => (g.home_team === t || g.away_team === t) && scoresReady(g))
+    .filter((g) => {
+      const k = Date.parse(g.kickoff);
+      return Number.isFinite(k) && Number.isFinite(before) && k < before;
+    })
+    .sort((a, b) => Date.parse(a.kickoff) - Date.parse(b.kickoff));
+}
+
+function lastFiveLetters(history, team, beforeKickoff, letterFn) {
+  const letters = [];
+  const games = priorScoredGames(history, team, beforeKickoff);
+  for (let i = games.length - 1; i >= 0 && letters.length < 5; i -= 1) {
+    const letter = letterFn(games[i], teamAbbr(team));
+    if (!letter || letter === 'T' || letter === 'P') continue;
+    letters.push(letter);
+  }
+  if (!letters.length) return null;
+  return letters.reverse().join('-');
+}
+
+function lastFiveOutright(history, team, beforeKickoff) {
+  return lastFiveLetters(history, team, beforeKickoff, (g, t) => resultLetter(t, g));
+}
+
+function lastFiveAts(history, team, beforeKickoff) {
+  return lastFiveLetters(history, team, beforeKickoff, (g, t) => atsLetter(g, t));
 }
 
 function previousGame(history, team, beforeKickoff) {
@@ -187,9 +226,12 @@ function sideContext(game, side, history) {
     city: teamCity(team),
     side,
     rest,
+    showRest: showRestDays(rest),
     short,
     last,
     lastGame: lastGameInfo(team, prev),
+    lastFive: lastFiveOutright(history, team, game.kickoff),
+    lastFiveAts: lastFiveAts(history, team, game.kickoff),
     homeWinPct: homePct,
     awayWinPct: awayPct,
     shortRestWinPct: short ? shortPct : null
@@ -276,5 +318,10 @@ module.exports = {
   pctLabel,
   winPct,
   previousGame,
-  lastGameInfo
+  lastGameInfo,
+  showRestDays,
+  lastFiveOutright,
+  lastFiveAts,
+  lastFiveLetters,
+  priorScoredGames
 };

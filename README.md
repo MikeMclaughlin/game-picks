@@ -20,7 +20,8 @@ Each game can take up to three independent wagers — outright winner, against t
 | `CLERK_SECRET_KEY` | Yes, for sign-in | Clerk secret key (`sk_…`) |
 | `CLERK_PUBLISHABLE_KEY` | Yes, for sign-in | Clerk publishable key (`pk_…`). `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` is also accepted (Marketplace name) |
 | `CLERK_JWT_KEY` | Optional | PEM JWT public key for networkless verify |
-| `ADMIN_KEY` | Optional | When set, `/api/import` and `/api/grade-all` require header `x-admin-key` (or `?key=`) |
+| `ADMIN_KEY` | Optional | When set, `/api/import`, `/api/grade-all`, and `/api/cron/scores` require header `x-admin-key` (or `?key=`). `Authorization: Bearer CRON_SECRET` is also accepted |
+| `CRON_SECRET` | Optional | Vercel cron Bearer token; allowed when `ADMIN_KEY` is set |
 | `PORT` | Optional | Local listen port (default `3000`) |
 | `POOL_SLUG` | Optional | Default pool (default `default`) |
 
@@ -33,7 +34,7 @@ Do not commit secrets. Copy `.env.example` to `.env` locally.
 3. Locally: `export DATABASE_URL='postgresql://…'` or put it in `.env` and load it before `npm start`.
 4. On Vercel: Project → Settings → Environment Variables → add `DATABASE_URL` (Production + Preview). Root Directory should be the app folder (repo root).
 
-Without `DATABASE_URL`, `npm start` still boots. `/api/health` and `/api/bootstrap` still return JSON from the bundled 2023–2026 seed / 2026 schedule. Sign-in and saved picks require the database.
+Without `DATABASE_URL`, `npm start` still boots. `/api/health` and `/api/bootstrap` still return JSON from the bundled 2016–2026 seed / 2026 schedule. Sign-in and saved picks require the database.
 
 Without Clerk keys, the app still boots. `/api/health` returns `auth: "missing"`. The header shows **Auth not configured** instead of crashing. See **[AUTH.md](AUTH.md)** for Vercel env vars and enabling Google and X/Twitter in the Clerk Dashboard.
 
@@ -50,22 +51,29 @@ Then:
 - `GET http://localhost:3000/api/health`
 - `GET http://localhost:3000/api/bootstrap`
 
-First request with `DATABASE_URL` set applies `sql/schema.sql` and seeds the last three completed seasons plus the current year (2023–2026 in v1). Import is written so history can later extend to 2010:
+First request with `DATABASE_URL` set applies `sql/schema.sql` and seeds **2016 through the current season**. Import current scores, then grade:
 
 ```bash
 npm run migrate
-npm run import -- --seasons=2023,2024,2025,2026
-# later, backtest:
+npm run import -- --from-2016
+# or explicit:
+npm run import -- --seasons=2016,2017,2018,2019,2020,2021,2022,2023,2024,2025,2026
+# optional deeper backtest:
 npm run import -- --from-2010
 npm run grade-all
 ```
 
-CLI `grade-all` and `GET`/`POST` `/api/grade-all` share the same grader.
+CLI `grade-all` and `GET`/`POST` `/api/grade-all` share the same grader. Import (including `/api/import` and `/api/cron/scores`) runs `gradeAll` automatically after scores land. Vercel cron hits `/api/cron/scores` hourly (`:20`) to refresh the current season and grade. If `ADMIN_KEY` is set, cron may authenticate with `Authorization: Bearer $CRON_SECRET` or `x-admin-key`.
+
+AI picks shown on Current Week cards are upserted into `ai_picks` (keyed by `game_id` / season / week). Query later with `GET /api/ai-picks?season=2026&week=2`.
+
+OUTRIGHT and ATS are mutually exclusive on the same game (O/U may coexist with either). Saving one market clears the other for that user/game. If both rows already exist from before this rule, the next save of either market deletes the partner.
 
 ## Product rules (server is source of truth)
 
 - Unique username handle per pool (`username_norm` = NFKC + trim + lower), keyed to Clerk via `clerk_user_id`
 - One wager row per `(user, game, market)` where market is `outright | ats | ou`
+- OUTRIGHT and ATS cannot both be stored for the same user/game; saving one deletes the other. O/U is independent
 - Validate against the current line; reject after kickoff
 - Grade from stored scores + `spread_line` / `total_line` (nflverse: **positive `spread_line` means home favored**)
   - Outright: pick wins if that team’s score is higher; tie = 0

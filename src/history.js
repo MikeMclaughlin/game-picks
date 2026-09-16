@@ -4,7 +4,7 @@ const { roadTravel, distanceBucket, sameDivision } = require('./teams');
 const { toNumber, scoresReady } = require('./grader');
 const { resultLetter } = require('./week-view');
 
-const DEFAULT_FROM = 2023;
+const DEFAULT_FROM = 2016;
 const DEFAULT_TO = 2026;
 
 const FILTER_DEFAULTS = {

@@ -7,5 +7,8 @@
       "config": { "includeFiles": ["public/**", "src/**", "data/**"] }
     }
   ],
-  "routes": [{ "src": "/(.*)", "dest": "server.js" }]
+  "routes": [{ "src": "/(.*)", "dest": "server.js" }],
+  "crons": [
+    { "path": "/api/cron/scores", "schedule": "20 * * * *" }
+  ]
 }

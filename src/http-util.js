@@ -67,16 +67,24 @@ function clearCookie() {
   return parts.join('; ');
 }
 
+function bearerToken(req) {
+  const auth = req.headers && (req.headers.authorization || req.headers.Authorization);
+  if (!auth) return null;
+  const match = String(auth).match(/^Bearer\s+(.+)$/i);
+  return match ? match[1] : null;
+}
+
 function requireAdmin(req, url) {
   const key = process.env.ADMIN_KEY;
   if (!key) return true;
-  const provided = req.headers['x-admin-key'] || url.searchParams.get('key');
-  if (provided !== key) {
-    const err = new Error('Admin key required');
-    err.statusCode = 401;
-    throw err;
-  }
-  return true;
+  const provided = (req.headers && req.headers['x-admin-key']) || (url && url.searchParams && url.searchParams.get('key'));
+  const bearer = bearerToken(req);
+  const cronSecret = process.env.CRON_SECRET;
+  if (provided === key || bearer === key) return true;
+  if (cronSecret && (bearer === cronSecret || provided === cronSecret)) return true;
+  const err = new Error('Admin key required');
+  err.statusCode = 401;
+  throw err;
 }
 
 function json(res, status, body, extraHeaders) {
@@ -166,6 +174,7 @@ module.exports = {
   clearCookie,
   parseCookies,
   requireAdmin,
+  bearerToken,
   json,
   readBody,
   mapGame,

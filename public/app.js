@@ -47,7 +47,7 @@
     historyTeam: 'ALL',
     historyFilters: {
       team: 'ALL',
-      from: 2023,
+      from: 2016,
       to: 2026,
       site: 'all',
       weather: 'all',
@@ -66,7 +66,7 @@
   let lastClerkUserId = undefined;
   const DEFAULT_HIST = {
     team: 'ALL',
-    from: 2023,
+    from: 2016,
     to: 2026,
     site: 'all',
     weather: 'all',
@@ -422,7 +422,9 @@
   function yearsForHistory() {
     const fromApi = (state.history && state.history.seasons) || [];
     if (fromApi.length) return fromApi;
-    return [2023, 2024, 2025, 2026];
+    const years = [];
+    for (let y = 2016; y <= 2026; y += 1) years.push(y);
+    return years;
   }
 
   function showPageError(err) {
@@ -540,10 +542,22 @@
   }
 
   function lastGameLabel(side) {
-    if (side.lastGame && side.lastGame.result) return side.lastGame.result;
+    if (side.lastGame && side.lastGame.label) return side.lastGame.label;
+    if (side.lastGame && side.lastGame.result) {
+      if (side.lastGame.result !== 'Tie' && side.lastGame.margin != null) {
+        return `${side.lastGame.result} by ${side.lastGame.margin}`;
+      }
+      return side.lastGame.result;
+    }
     if (side.last === 'W') return 'Win';
     if (side.last === 'L') return 'Loss';
     if (side.last === 'T') return 'Tie';
+    return null;
+  }
+
+  function exclusivePartner(market) {
+    if (market === 'outright') return 'ats';
+    if (market === 'ats') return 'outright';
     return null;
   }
 
@@ -555,11 +569,19 @@
       const detail = side.lastGame && side.lastGame.opponent != null
         ? ` title="vs ${esc(side.lastGame.opponent)} ${side.lastGame.teamScore}-${side.lastGame.oppScore}"`
         : '';
-      rows.push(`<div class="side-stat muted"${detail}>Last Game: ${esc(last)}</div>`);
+      rows.push(`<div class="side-stat muted"${detail}>Last game: ${esc(last)}</div>`);
     }
-    if (side.rest != null) {
+    if (side.lastFive) {
+      rows.push(`<div class="side-stat muted" title="Last 5 outright results, oldest to newest (ties omitted)">Last 5: ${esc(side.lastFive)}</div>`);
+    }
+    if (side.lastFiveAts) {
+      rows.push(`<div class="side-stat muted" title="Last 5 ATS covers (C) or fails (F), oldest to newest; pushes omitted">ATS 5: ${esc(side.lastFiveAts)}</div>`);
+    }
+    const rest = side.rest;
+    const showRest = side.showRest === true || (side.showRest !== false && rest != null && Number(rest) !== 7);
+    if (rest != null && showRest) {
       const shortBit = side.short ? ' SHORT' : '';
-      rows.push(`<div class="side-stat${side.short ? ' alert' : ' muted'}">Rest Days: ${esc(side.rest)}${shortBit}</div>`);
+      rows.push(`<div class="side-stat${side.short ? ' alert' : ' muted'}">Rest Days: ${esc(rest)}${shortBit}</div>`);
     }
     if (side.short && side.shortRestWinPct != null) {
       rows.push(`<div class="side-stat alert">Win% ${fmtPct(side.shortRestWinPct)} on Short Rest</div>`);
@@ -577,13 +599,22 @@
     const labels = { outright: 'OUTRIGHT', ats: 'ATS', ou: 'OU' };
     const current = wagerFor(game, market);
     const locked = game.locked;
+    const partner = exclusivePartner(market);
+    const partnerWager = partner ? wagerFor(game, partner) : null;
+    const blocked = Boolean(partnerWager && partnerWager.selection);
+    const disabled = locked || (blocked && !current);
     const on = (val) => current && String(current.selection).toUpperCase() === String(val).toUpperCase();
     const leftLabel = leftText == null ? left : leftText;
     const rightLabel = rightText == null ? right : rightText;
-    return `<div class="pick">
+    const reason = locked
+      ? 'Locked at kickoff'
+      : (blocked && !current
+        ? `Clear ${String(partner).toUpperCase()} to pick ${String(market).toUpperCase()}`
+        : null);
+    return `<div class="pick${blocked && !current ? ' exclusive-off' : ''}">
       <label>${labels[market] || market}</label>
-      <button type="button" data-gid="${esc(game.game_id)}" data-market="${market}" data-sel="${esc(left)}" class="${on(left) ? 'on' : ''}" ${locked ? 'disabled' : ''} title="${locked ? 'Locked at kickoff' : `Pick ${leftLabel} ${market}`}">${esc(leftLabel)}</button>
-      <button type="button" data-gid="${esc(game.game_id)}" data-market="${market}" data-sel="${esc(right)}" class="${on(right) ? 'on' : ''}" ${locked ? 'disabled' : ''} title="${locked ? 'Locked at kickoff' : `Pick ${rightLabel} ${market}`}">${esc(rightLabel)}</button>
+      <button type="button" data-gid="${esc(game.game_id)}" data-market="${market}" data-sel="${esc(left)}" class="${on(left) ? 'on' : ''}" ${disabled ? 'disabled' : ''} title="${esc(reason || `Pick ${leftLabel} ${market}`)}">${esc(leftLabel)}</button>
+      <button type="button" data-gid="${esc(game.game_id)}" data-market="${market}" data-sel="${esc(right)}" class="${on(right) ? 'on' : ''}" ${disabled ? 'disabled' : ''} title="${esc(reason || `Pick ${rightLabel} ${market}`)}">${esc(rightLabel)}</button>
     </div>`;
   }
 
