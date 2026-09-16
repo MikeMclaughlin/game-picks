@@ -20,7 +20,7 @@ const { assertUsername } = require('./username');
 const { validatePick, gradeAll, isLocked } = require('./grader');
 const { importGames, loadSeedGames, loadSchedule2026, defaultSeasons } = require('./nfl-data');
 const { enrichGame, currentSeasonWeek } = require('./week-view');
-const { teamHistory } = require('./history');
+const { parseHistoryFilters, historyPayload } = require('./history');
 const { listTeamAbbrs } = require('./teams');
 
 const ROOT = path.join(__dirname, '..');
@@ -415,11 +415,11 @@ async function handleApi(req, res, url) {
   if (pathname === '/api/history' && method === 'GET') {
     if (sql) await seedIfNeeded(sql);
     const games = await allGames(sql);
-    const team = (url.searchParams.get('team') || 'ALL').toUpperCase();
-    const fromSeason = Number(url.searchParams.get('from') || 2023);
-    const filtered = games.filter((g) => Number(g.season) >= fromSeason && g.game_type !== 'PRE');
-    const payload = teamHistory(filtered, team === 'ALL' ? 'ALL' : team);
-    return json(res, 200, { ok: true, fromSeason, team, ...payload });
+    const seasons = [...new Set(games.map((g) => Number(g.season)).filter(Number.isFinite))];
+    const maxSeason = seasons.length ? Math.max(...seasons) : 2026;
+    const filters = parseHistoryFilters(url.searchParams, { to: maxSeason });
+    const payload = historyPayload(games, filters);
+    return json(res, 200, payload);
   }
 
   if (pathname === '/api/grade-all' && (method === 'GET' || method === 'POST')) {
