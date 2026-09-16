@@ -18,6 +18,15 @@ test('ATS display line uses home-favored spread_line', () => {
   assert.equal(formatAtsPick('NE', game), 'NE +3');
 });
 
+test('ATS labels mirror the signed spread on both sides', () => {
+  const homeFav = { home_team: 'BUF', away_team: 'DET', spread_line: 4.5 };
+  assert.equal(formatAtsPick('BUF', homeFav), 'BUF -4.5');
+  assert.equal(formatAtsPick('DET', homeFav), 'DET +4.5');
+  const awayFav = { home_team: 'DET', away_team: 'BUF', spread_line: -4.5 };
+  assert.equal(formatAtsPick('BUF', awayFav), 'BUF -4.5');
+  assert.equal(formatAtsPick('DET', awayFav), 'DET +4.5');
+});
+
 test('no history fades totals >= 46 toward under', () => {
   const proj = projectGame({ home_team: 'SEA', away_team: 'NE', total_line: 46, spread_line: 3 }, []);
   assert.equal(proj.hasHistory, false);

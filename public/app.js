@@ -119,6 +119,23 @@
     const fav = game.spread_line >= 0 ? game.home_team : game.away_team;
     return `${fav} -${abs}`;
   }
+  // Positive spread_line means home favored (same convention as the payload / grader).
+  function formatAtsLine(n) {
+    const num = Number(n);
+    if (!Number.isFinite(num)) return null;
+    const rounded = Math.round(num * 10) / 10;
+    return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+  }
+  function atsPickLabel(game, team) {
+    if (game.spread_line == null) return team;
+    const spread = Number(game.spread_line);
+    if (!Number.isFinite(spread)) return team;
+    const line = team === game.home_team ? -spread : spread;
+    const shown = formatAtsLine(line);
+    if (shown == null) return team;
+    const signed = line > 0 ? `+${shown}` : shown;
+    return `${team} ${signed}`;
+  }
   function kickoffLabel(game) {
     const iso = typeof game === 'string' ? game : game && game.kickoff;
     const weekday = typeof game === 'object' && game && game.weekday;
@@ -515,15 +532,17 @@
     return rows.join('');
   }
 
-  function pickRow(game, market, left, right) {
+  function pickRow(game, market, left, right, leftText, rightText) {
     const labels = { outright: 'OUTRIGHT', ats: 'ATS', ou: 'OU' };
     const current = wagerFor(game, market);
     const locked = game.locked;
     const on = (val) => current && String(current.selection).toUpperCase() === String(val).toUpperCase();
+    const leftLabel = leftText == null ? left : leftText;
+    const rightLabel = rightText == null ? right : rightText;
     return `<div class="pick">
       <label>${labels[market] || market}</label>
-      <button type="button" data-gid="${esc(game.game_id)}" data-market="${market}" data-sel="${esc(left)}" class="${on(left) ? 'on' : ''}" ${locked ? 'disabled' : ''} title="${locked ? 'Locked at kickoff' : `Pick ${left} ${market}`}">${esc(left)}</button>
-      <button type="button" data-gid="${esc(game.game_id)}" data-market="${market}" data-sel="${esc(right)}" class="${on(right) ? 'on' : ''}" ${locked ? 'disabled' : ''} title="${locked ? 'Locked at kickoff' : `Pick ${right} ${market}`}">${esc(right)}</button>
+      <button type="button" data-gid="${esc(game.game_id)}" data-market="${market}" data-sel="${esc(left)}" class="${on(left) ? 'on' : ''}" ${locked ? 'disabled' : ''} title="${locked ? 'Locked at kickoff' : `Pick ${leftLabel} ${market}`}">${esc(leftLabel)}</button>
+      <button type="button" data-gid="${esc(game.game_id)}" data-market="${market}" data-sel="${esc(right)}" class="${on(right) ? 'on' : ''}" ${locked ? 'disabled' : ''} title="${locked ? 'Locked at kickoff' : `Pick ${rightLabel} ${market}`}">${esc(rightLabel)}</button>
     </div>`;
   }
 
@@ -567,7 +586,7 @@
       ${aiRaw ? `<div class="ai"><span>AI Pick:</span> ${esc(aiRaw)}</div>` : ''}
       <div class="picks">
         ${pickRow(game, 'outright', game.away_team, game.home_team)}
-        ${pickRow(game, 'ats', game.away_team, game.home_team)}
+        ${pickRow(game, 'ats', game.away_team, game.home_team, atsPickLabel(game, game.away_team), atsPickLabel(game, game.home_team))}
         ${pickRow(game, 'ou', 'over', 'under')}
       </div>
     </article>`;
