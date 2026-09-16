@@ -8,7 +8,7 @@ Each game can take up to three independent wagers — outright winner, against t
 
 - Node.js `http` server only (no Express, no Next.js)
 - Neon Postgres via `DATABASE_URL` and `@neondatabase/serverless` (HTTP)
-- Clerk social sign-in (Google, Apple, X/Twitter) via `@clerk/backend` + Clerk browser CDN
+- Clerk social sign-in (Google, X/Twitter) via `@clerk/backend` + Clerk browser CDN
 - Vanilla `public/index.html`, `public/styles.css`, `public/app.js`
 - Schedule, scores, and lines from [nfldata.org](https://www.nfldata.org/) (`spread_line`, `total_line`, scores), with GitHub nflverse mirrors and `data/schedule-2026.json` as fallback
 
@@ -35,7 +35,7 @@ Do not commit secrets. Copy `.env.example` to `.env` locally.
 
 Without `DATABASE_URL`, `npm start` still boots. `/api/health` and `/api/bootstrap` still return JSON from the bundled 2023–2026 seed / 2026 schedule. Sign-in and saved picks require the database.
 
-Without Clerk keys, the app still boots. `/api/health` returns `auth: "missing"`. The header shows **Auth not configured** instead of crashing. See **[AUTH.md](AUTH.md)** for Vercel env vars and enabling Google, Apple, and X/Twitter in the Clerk Dashboard.
+Without Clerk keys, the app still boots. `/api/health` returns `auth: "missing"`. The header shows **Auth not configured** instead of crashing. See **[AUTH.md](AUTH.md)** for Vercel env vars and enabling Google and X/Twitter in the Clerk Dashboard.
 
 ## Run locally
 
@@ -78,4 +78,4 @@ CLI `grade-all` and `GET`/`POST` `/api/grade-all` share the same grader.
 
 `vercel.json` routes all traffic to `server.js` (`@vercel/node`) and includes `public/**`, `src/**`, and `data/**`. Do not switch to `/api/[...path]` rewrites.
 
-Set `DATABASE_URL` plus Clerk keys on the Vercel project (`CLERK_SECRET_KEY` and `CLERK_PUBLISHABLE_KEY` or `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`), enable Google / Apple / X in the Clerk Dashboard (see [AUTH.md](AUTH.md)), then deploy.
+Set `DATABASE_URL` plus Clerk keys on the Vercel project (`CLERK_SECRET_KEY` and `CLERK_PUBLISHABLE_KEY` or `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`), enable Google and X in the Clerk Dashboard (see [AUTH.md](AUTH.md)), then deploy.
