@@ -34,6 +34,20 @@
     const d = new Date(iso);
     return d.toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' });
   }
+  const dbBanner = document.getElementById('db-banner');
+
+  function showBanner(payload) {
+    if (!dbBanner) return;
+    const text = (payload && (payload.error || payload.hint)) || '';
+    if (!text) {
+      dbBanner.hidden = true;
+      dbBanner.textContent = '';
+      return;
+    }
+    dbBanner.hidden = false;
+    dbBanner.textContent = payload.hint ? `${payload.error} ${payload.hint}` : text;
+  }
+
   async function api(path, opts) {
     const res = await fetch(path, {
       credentials: 'same-origin',
@@ -41,7 +55,12 @@
       ...opts
     });
     const data = await res.json().catch(() => ({ ok: false, error: res.statusText }));
-    if (!res.ok) throw new Error(data.error || res.statusText);
+    if (!res.ok) {
+      const err = new Error(data.error || res.statusText);
+      err.payload = data;
+      err.status = res.status;
+      throw err;
+    }
     return data;
   }
   function setWho(user) {
@@ -72,13 +91,20 @@
       state.week = null;
       await load();
     } catch (err) {
-      alert(err.message);
+      showBanner(err.payload || { error: err.message });
     }
   });
 
   async function load() {
     if (!state.bootstrap) state.bootstrap = await api('/api/bootstrap');
     setWho(state.bootstrap.user);
+    if (state.bootstrap.db) showBanner(null);
+    else {
+      showBanner({
+        error: 'Database is not connected yet.',
+        hint: 'Browse the week now. Sign-in and saved picks wait on DATABASE_URL (Neon on Vercel).'
+      });
+    }
     if (state.page === 'week' && !state.week) {
       state.week = await api(`/api/week?season=${state.bootstrap.season}&week=${state.bootstrap.week}`);
     }
