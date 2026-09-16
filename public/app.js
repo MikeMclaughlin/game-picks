@@ -510,7 +510,7 @@
       rows.push(`<div class="side-stat muted">Home Win%: ${fmtPct(side.homeWinPct)}</div>`);
     }
     if (!isHome && side.awayWinPct != null) {
-      rows.push(`<div class="side-stat muted">away Win%: ${fmtPct(side.awayWinPct)}</div>`);
+      rows.push(`<div class="side-stat muted">Away Win%: ${fmtPct(side.awayWinPct)}</div>`);
     }
     return rows.join('');
   }
