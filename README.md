@@ -63,7 +63,7 @@ npm run import -- --from-2010
 npm run grade-all
 ```
 
-CLI `grade-all` and `GET`/`POST` `/api/grade-all` share the same grader. Import (including `/api/import` and `/api/cron/scores`) runs `gradeAll` automatically after scores land. Vercel cron hits `/api/cron/scores` hourly (`:20`) to refresh the current season and grade. If `ADMIN_KEY` is set, cron may authenticate with `Authorization: Bearer $CRON_SECRET` or `x-admin-key`.
+CLI `grade-all` and `GET`/`POST` `/api/grade-all` share the same grader. Import (including `/api/import` and `/api/cron/scores`) runs `gradeAll` automatically after scores land. Vercel Hobby allows one cron per day, so `/api/cron/scores` runs daily at 12:20 UTC (08:20 ET) to refresh the current season and grade. If `ADMIN_KEY` is set, cron may authenticate with `Authorization: Bearer $CRON_SECRET` or `x-admin-key`.
 
 AI picks shown on Current Week cards are upserted into `ai_picks` (keyed by `game_id` / season / week). Query later with `GET /api/ai-picks?season=2026&week=2`.
 
