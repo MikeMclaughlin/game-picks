@@ -2,7 +2,7 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { impliedPoints, projectGame, formatAtsPick, currentSeasonWeek, enrichGame, lastGameInfo, showRestDays, showRestWinPct, restAmountWinPct, lastFiveOutright, lastFiveAts } = require('../src/week-view');
+const { impliedPoints, projectGame, formatAtsPick, currentSeasonWeek, enrichGame, lastGameInfo, showRestDays, showRestWinPct, restAmountWinPct, lastFiveOutright, lastFiveAts, aiConfidence, expectedCallLabel, aiPick } = require('../src/week-view');
 const { roadTravel, teamCity } = require('../src/teams');
 const { UPSERT_SQL } = require('../src/nfl-data');
 
@@ -178,6 +178,11 @@ test('enrichGame exposes lastGame, city, short rest, and xPts from the line', ()
   assert.equal(card.home.showRestWinPct, true);
   assert.equal(Object.prototype.hasOwnProperty.call(card.away, 'restWinPct'), true);
   assert.equal(card.kickoffSlot, 'slot-thu');
+  assert.equal(Object.prototype.hasOwnProperty.call(card.aiPick, 'confidence'), true);
+  assert.equal(typeof card.aiPick.confidence, 'number');
+  assert.ok(card.aiPick.confidence >= 51 && card.aiPick.confidence <= 92);
+  assert.ok(card.aiPick.expected);
+  assert.match(card.aiPick.expected, / and /);
 });
 
 test('last-5 streaks are oldest-to-newest and skip ties/pushes', () => {
@@ -225,4 +230,26 @@ test('last-5 streaks are oldest-to-newest and skip ties/pushes', () => {
   assert.equal(later.home.lastFiveAts, 'C-F-C-F-C');
   assert.equal(later.home.showRest, false);
   assert.equal(later.away.showRest, true);
+});
+
+test('expected call label and confidence stay in documented bounds', () => {
+  assert.equal(expectedCallLabel('BUF -5.5', 'over'), 'BUF -5.5 and Over');
+  assert.equal(expectedCallLabel('SEA +3', 'under'), 'SEA +3 and Under');
+  assert.equal(aiConfidence({ total_line: 46 }, { hasHistory: false, fadeHighTotal: true }), 54);
+  assert.equal(aiConfidence({ total_line: 40 }, { hasHistory: false, fadeHighTotal: false }), 52);
+  const high = aiConfidence(
+    { spread_line: 3, total_line: 44 },
+    { hasHistory: true, projMargin: 10, projTotal: 52, sampleN: 80 }
+  );
+  assert.ok(high >= 51 && high <= 92);
+  const pick = aiPick({ home_team: 'BUF', away_team: 'MIA', spread_line: 5.5, total_line: 48 }, {
+    hasHistory: true,
+    atsTeam: 'BUF',
+    ou: 'over',
+    projMargin: 8,
+    projTotal: 50,
+    sampleN: 40
+  });
+  assert.equal(pick.expected, 'BUF -5.5 and Over');
+  assert.equal(typeof pick.confidence, 'number');
 });
