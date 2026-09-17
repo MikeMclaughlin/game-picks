@@ -61,7 +61,28 @@
     historyMore: false,
     historySort: { key: 'team', dir: 'asc' },
     historyGameSort: { key: 'gameDate', dir: 'desc' },
-    historyLoading: false
+    historyLoading: false,
+    backtest: null,
+    backtestError: null,
+    backtestLoading: false,
+    backtestMore: false,
+    backtestFilters: {
+      team: 'ALL',
+      from: 2016,
+      to: 2026,
+      site: 'all',
+      weather: 'all',
+      travel: 'all',
+      distance: 'all',
+      roof: 'all',
+      role: 'all',
+      division: 'all',
+      daysOff: 'all',
+      spread: 'all',
+      total: 'all'
+    },
+    backtestChain: [],
+    backtestSort: { key: 'gameDate', dir: 'desc' }
   };
   let clerk = null;
   let lastClerkUserId = undefined;
@@ -78,6 +99,29 @@
     division: 'all',
     daysOff: 'all'
   };
+  const DEFAULT_BT = {
+    ...DEFAULT_HIST,
+    spread: 'all',
+    total: 'all'
+  };
+  const LS_WEEK = 'game-picks:week:v1';
+  const LS_HISTORY = 'game-picks:history:v1';
+  const LS_BACKTEST = 'game-picks:backtest:v1';
+  const CHAIN_DIMS = [
+    { dim: 'lastGame', label: 'Last game W/L', options: [{ value: 'W', label: 'Win' }, { value: 'L', label: 'Loss' }, { value: 'T', label: 'Tie' }] },
+    { dim: 'last5wl', label: 'Last-5 W/L', options: [{ value: 'hot', label: 'Hot (4–5 W)' }, { value: 'mixed', label: 'Mixed (2–3 W)' }, { value: 'cold', label: 'Cold (0–1 W)' }] },
+    { dim: 'last5ats', label: 'Last-5 ATS', options: [{ value: 'hot', label: 'Hot (4–5 C)' }, { value: 'mixed', label: 'Mixed (2–3 C)' }, { value: 'cold', label: 'Cold (0–1 C)' }] },
+    { dim: 'rest', label: 'Rest', options: [{ value: 'short', label: 'Short ≤5' }, { value: 'normal', label: 'Normal' }, { value: 'bye', label: 'Bye+ ≥11' }] },
+    { dim: 'site', label: 'Home/away', options: [{ value: 'home', label: 'Home' }, { value: 'road', label: 'Road' }] },
+    { dim: 'division', label: 'Divisional', options: [{ value: 'divisional', label: 'Divisional' }, { value: 'non-div', label: 'Non-div' }] },
+    { dim: 'role', label: 'Dog/fav', options: [{ value: 'favorite', label: 'Favorite' }, { value: 'underdog', label: 'Underdog' }] },
+    { dim: 'spread', label: 'Spread size', options: [{ value: 'pick', label: 'Pick’em' }, { value: 'small', label: 'Small ≤3' }, { value: 'medium', label: 'Medium ≤6.5' }, { value: 'large', label: 'Large 7+' }] },
+    { dim: 'total', label: 'Total', options: [{ value: 'low', label: 'Low <42' }, { value: 'mid', label: 'Mid 42–47.5' }, { value: 'high', label: 'High ≥48' }] },
+    { dim: 'weather', label: 'Weather', options: [{ value: 'cold', label: 'Cold' }, { value: 'windy', label: 'Windy' }, { value: 'fair', label: 'Fair' }, { value: 'dome', label: 'Dome' }] },
+    { dim: 'roof', label: 'Roof', options: [{ value: 'dome', label: 'Dome' }, { value: 'outdoor', label: 'Outdoor' }, { value: 'retractable', label: 'Retractable' }] },
+    { dim: 'travel', label: 'Travel', options: [{ value: 'east', label: 'East' }, { value: 'west', label: 'West' }] },
+    { dim: 'distance', label: 'Distance', options: [{ value: 'local', label: 'Local' }, { value: 'cross', label: 'Cross-country' }] }
+  ];
   const HIST_CHIP_META = [
     { key: 'team', label: 'Team' },
     { key: 'from', label: 'From year' },
@@ -92,7 +136,69 @@
     { key: 'daysOff', label: 'Days off', names: { short: 'Short rest', normal: 'Normal', bye: 'Bye+' } }
   ];
   const SECONDARY_HIST = new Set(['distance', 'roof', 'role', 'division', 'daysOff']);
+  const BT_CHIP_META = [
+    ...HIST_CHIP_META,
+    { key: 'spread', label: 'Spread', names: { pick: 'Pick’em', small: 'Small', medium: 'Medium', large: 'Large' } },
+    { key: 'total', label: 'Total', names: { low: 'Low', mid: 'Mid', high: 'High' } }
+  ];
+  const SECONDARY_BT = new Set(['distance', 'roof', 'role', 'division', 'daysOff', 'spread', 'total']);
   let loadGen = 0;
+
+  function readStore(key, fallback) {
+    try {
+      const raw = window.localStorage.getItem(key);
+      if (!raw) return fallback;
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object') return fallback;
+      return parsed;
+    } catch {
+      return fallback;
+    }
+  }
+  function writeStore(key, value) {
+    try {
+      window.localStorage.setItem(key, JSON.stringify(value));
+    } catch { /* quota / private mode */ }
+  }
+  function persistWeek() {
+    writeStore(LS_WEEK, { filters: state.filters });
+  }
+  function persistHistory() {
+    writeStore(LS_HISTORY, { filters: state.historyFilters, more: state.historyMore });
+  }
+  function persistBacktest() {
+    writeStore(LS_BACKTEST, {
+      filters: state.backtestFilters,
+      chain: state.backtestChain,
+      more: state.backtestMore
+    });
+  }
+  function restoreCriteria() {
+    const week = readStore(LS_WEEK, null);
+    if (week && week.filters) {
+      state.filters = {
+        homeDog: Boolean(week.filters.homeDog),
+        projOver: Boolean(week.filters.projOver),
+        projUnder: Boolean(week.filters.projUnder)
+      };
+      if (state.filters.projOver && state.filters.projUnder) state.filters.projUnder = false;
+    }
+    const hist = readStore(LS_HISTORY, null);
+    if (hist && hist.filters) {
+      state.historyFilters = { ...DEFAULT_HIST, ...hist.filters };
+      state.historyTeam = state.historyFilters.team;
+      if (hist.more != null) state.historyMore = Boolean(hist.more);
+    }
+    const bt = readStore(LS_BACKTEST, null);
+    if (bt && bt.filters) state.backtestFilters = { ...DEFAULT_BT, ...bt.filters };
+    if (bt && Array.isArray(bt.chain)) {
+      state.backtestChain = bt.chain
+        .filter((s) => s && s.dim)
+        .map((s) => ({ dim: String(s.dim), value: s.value == null || s.value === '' ? 'all' : String(s.value) }));
+    }
+    if (bt && bt.more != null) state.backtestMore = Boolean(bt.more);
+  }
+  restoreCriteria();
 
   function esc(s) {
     return String(s == null ? '' : s)
@@ -394,6 +500,16 @@
     }
   }
 
+  function backtestQuery(filters, chain) {
+    const f = filters || state.backtestFilters;
+    const p = new URLSearchParams(historyQuery(f));
+    if (f.spread && f.spread !== 'all') p.set('spread', f.spread);
+    if (f.total && f.total !== 'all') p.set('total', f.total);
+    const steps = (chain || state.backtestChain || []).filter((s) => s && s.dim && s.value && s.value !== 'all');
+    if (steps.length) p.set('chain', steps.map((s) => `${s.dim}:${s.value}`).join(','));
+    return p.toString();
+  }
+
   function historyQuery(filters) {
     const f = filters || state.historyFilters;
     const p = new URLSearchParams();
@@ -442,6 +558,10 @@
       state.history = null;
       state.historyError = null;
       state.historyLoading = true;
+    } else if (state.page === 'backtest') {
+      state.backtest = null;
+      state.backtestError = null;
+      state.backtestLoading = true;
     } else if (state.page === 'week') {
       state.week = null;
     } else if (state.page === 'standings') {
@@ -519,11 +639,31 @@
           }
         }
       }
+      if (state.page === 'backtest' && !state.backtest) {
+        state.backtestLoading = true;
+        const backtest = await api(`/api/backtest?${backtestQuery()}`);
+        if (gen !== loadGen) return;
+        state.backtest = backtest;
+        state.backtestError = null;
+        state.backtestLoading = false;
+        if (backtest && backtest.seasons && backtest.seasons.length) {
+          const maxY = backtest.seasons[backtest.seasons.length - 1];
+          if (state.backtestFilters.to === DEFAULT_BT.to && maxY !== DEFAULT_BT.to) {
+            state.backtestFilters.to = maxY;
+          }
+        }
+      }
     } catch (err) {
       if (gen !== loadGen) return;
       if (state.page === 'history') {
         state.historyError = (err && err.message) || 'Failed to load history';
         state.historyLoading = false;
+        render();
+        return;
+      }
+      if (state.page === 'backtest') {
+        state.backtestError = (err && err.message) || 'Failed to load backtest';
+        state.backtestLoading = false;
         render();
         return;
       }
@@ -697,7 +837,12 @@
   }
 
   function card(game) {
-    const aiRaw = game.aiPick && game.aiPick.label ? game.aiPick.label.replace(/^AI Pick:\s*/i, '').trim() : '';
+    const pick = game.aiPick || {};
+    const aiRaw = pick.expected
+      || (pick.label ? pick.label.replace(/^AI Pick:\s*/i, '').trim() : '');
+    const conf = pick.confidence != null && Number.isFinite(Number(pick.confidence))
+      ? `<span class="ai-conf" title="Rule-based confidence 51–92 from ATS/OU projection edges and prior sample size — not a model probability.">${esc(String(Math.round(Number(pick.confidence))))}%</span>`
+      : '';
     const awayCity = (game.away && game.away.city) || game.away_team;
     const homeCity = (game.home && game.home.city) || game.home_team;
     const slot = kickoffSlotClass(game);
@@ -719,7 +864,7 @@
       </div>
       ${cardStatRows(game)}
       <div class="card-foot">
-        ${aiRaw ? `<div class="ai"><span>AI Pick:</span> ${esc(aiRaw)}</div>` : ''}
+        ${aiRaw ? `<div class="ai"><span>AI Pick:</span> ${esc(aiRaw)}${conf}</div>` : ''}
         <div class="picks">
           ${pickRow(game, 'outright', game.away_team, game.home_team, outrightPickLabel(game.away_team), outrightPickLabel(game.home_team))}
           ${pickRow(game, 'ats', game.away_team, game.home_team, atsPickLabel(game, game.away_team), atsPickLabel(game, game.home_team))}
@@ -991,6 +1136,298 @@
     </table></div>`;
   }
 
+  function activeBtChips() {
+    return BT_CHIP_META.filter((meta) => {
+      const v = state.backtestFilters[meta.key];
+      return String(v) !== String(DEFAULT_BT[meta.key]);
+    }).map((meta) => {
+      const raw = state.backtestFilters[meta.key];
+      const shown = meta.names && meta.names[raw] ? meta.names[raw] : raw;
+      return { key: meta.key, text: `${meta.label}: ${shown}` };
+    });
+  }
+
+  function chainDimOptions(selected) {
+    return optList([{ value: '', label: 'Dimension' }, ...CHAIN_DIMS.map((d) => ({ value: d.dim, label: d.label }))], selected);
+  }
+
+  function chainValueOptions(dim, selected) {
+    const meta = CHAIN_DIMS.find((d) => d.dim === dim);
+    const opts = [{ value: 'all', label: 'Any' }, ...((meta && meta.options) || [])];
+    return optList(opts, selected || 'all');
+  }
+
+  function backtestFiltersForm() {
+    const f = state.backtestFilters;
+    const teams = ['ALL', ...(state.bootstrap?.teams || [])];
+    const years = (state.backtest && state.backtest.seasons) || yearsForHistory();
+    const moreOpen = state.backtestMore || activeBtChips().some((c) => SECONDARY_BT.has(c.key));
+    const chips = activeBtChips();
+    return `<form id="bt-filters" class="hist-bar">
+      <div class="hist-row">
+        <label>Team <select name="team" title="Team-relative slice">${optList(teams, f.team)}</select></label>
+        <label>From year <select name="from">${optList(years, f.from)}</select></label>
+        <label>To year <select name="to">${optList(years, f.to)}</select></label>
+        <label>Site <select name="site">${optList([{ value: 'all', label: 'All' }, { value: 'home', label: 'Home' }, { value: 'road', label: 'Road' }], f.site)}</select></label>
+        <label>Weather <select name="weather">${optList([{ value: 'all', label: 'All' }, { value: 'cold', label: 'Cold' }, { value: 'windy', label: 'Windy' }, { value: 'fair', label: 'Fair' }], f.weather)}</select></label>
+        <label>Travel <select name="travel">${optList([{ value: 'all', label: 'All' }, { value: 'east', label: 'East' }, { value: 'west', label: 'West' }], f.travel)}</select></label>
+        <div class="hist-actions">
+          <button type="button" class="btn-more" data-bt-more aria-expanded="${moreOpen ? 'true' : 'false'}">${moreOpen ? 'Fewer filters' : 'More filters'}</button>
+          <button type="button" class="btn-reset" data-bt-reset>Reset</button>
+        </div>
+      </div>
+      <div class="hist-row" id="bt-more" ${moreOpen ? '' : 'hidden'}>
+        <label>Distance <select name="distance">${optList([{ value: 'all', label: 'All' }, { value: 'local', label: 'Local' }, { value: 'cross', label: 'Cross-country' }], f.distance)}</select></label>
+        <label>Roof <select name="roof">${optList([{ value: 'all', label: 'All' }, { value: 'dome', label: 'Dome' }, { value: 'outdoor', label: 'Outdoor' }, { value: 'retractable', label: 'Retractable' }], f.roof)}</select></label>
+        <label>Role <select name="role">${optList([{ value: 'all', label: 'All' }, { value: 'favorite', label: 'Favorite' }, { value: 'underdog', label: 'Underdog' }], f.role)}</select></label>
+        <label>Division <select name="division">${optList([{ value: 'all', label: 'All' }, { value: 'divisional', label: 'Divisional' }, { value: 'non-div', label: 'Non-div' }], f.division)}</select></label>
+        <label>Days off <select name="daysOff">${optList([{ value: 'all', label: 'All' }, { value: 'short', label: 'Short rest' }, { value: 'normal', label: 'Normal' }, { value: 'bye', label: 'Bye+' }], f.daysOff)}</select></label>
+        <label>Spread size <select name="spread" title="|spread_line| buckets">${optList([{ value: 'all', label: 'All' }, { value: 'pick', label: 'Pick’em' }, { value: 'small', label: 'Small ≤3' }, { value: 'medium', label: 'Medium ≤6.5' }, { value: 'large', label: 'Large 7+' }], f.spread)}</select></label>
+        <label>Total <select name="total" title="Closing total buckets">${optList([{ value: 'all', label: 'All' }, { value: 'low', label: 'Low <42' }, { value: 'mid', label: 'Mid 42–47.5' }, { value: 'high', label: 'High ≥48' }], f.total)}</select></label>
+      </div>
+      ${chips.length ? `<div class="hist-chips">${chips.map((c) => `<button type="button" class="filter-chip" data-bt-chip-clear="${c.key}">${c.text} ×</button>`).join('')}</div>` : ''}
+    </form>`;
+  }
+
+  function chainBuilder() {
+    const steps = state.backtestChain.length ? state.backtestChain : [{ dim: '', value: 'all' }];
+    return `<div class="bt-chain">
+      <h2>Sequence / Markov builder</h2>
+      <p class="bt-note">Ordered pre-game states. The next-game distribution is the slice that matches every step. Last-5 hot = 4–5 wins/covers; cold = 0–1. Filters above apply first.</p>
+      ${steps.map((step, i) => `<div class="bt-step">
+        ${i ? '<span class="bt-arrow">→</span>' : ''}
+        <select data-chain-dim="${i}">${chainDimOptions(step.dim)}</select>
+        <select data-chain-val="${i}">${chainValueOptions(step.dim, step.value)}</select>
+        <button type="button" class="btn-del" data-chain-del="${i}" title="Remove step">×</button>
+      </div>`).join('')}
+      <div class="hist-actions">
+        <button type="button" class="btn-add" data-chain-add>+ Add state</button>
+      </div>
+    </div>`;
+  }
+
+  function fmtLift(v, rel) {
+    if (v == null) return '—';
+    const pts = v * 100;
+    const sign = pts > 0 ? '+' : '';
+    const relBit = rel == null ? '' : ` (${rel >= 0 ? '+' : ''}${(rel * 100).toFixed(1)}% rel)`;
+    return `${sign}${pts.toFixed(1)} pts${relBit}`;
+  }
+
+  function liftClass(v) {
+    if (v == null) return '';
+    return v >= 0 ? 'lift-pos' : 'lift-neg';
+  }
+
+  function recPct(r) {
+    if (!r) return { label: '0-0', pct: '—' };
+    return { label: r.label || '0-0', pct: fmtPct(r.pct) };
+  }
+
+  function backtestSummary(data) {
+    const slice = data.slice || {};
+    const small = data.smallN;
+    const n = data.n || 0;
+    const su = recPct(slice.outright);
+    const ats = recPct(slice.ats);
+    const ou = recPct(slice.ou);
+    const warn = small
+      ? `<p class="bt-warn">N &lt; ${esc(data.smallNThreshold || 30)} — greyed rates are too small to trust. Treat them as noisy.</p>`
+      : '';
+    return `${warn}<div class="bt-stats${small ? ' small-n' : ''}">
+      <div class="bt-stat"><div class="k">Sample N</div><div class="v">${fmtInt(n)}</div><div class="s">${fmtInt(data.uniqueGames)} unique games</div></div>
+      <div class="bt-stat"><div class="k">Outright W-L-T</div><div class="v">${esc(su.pct)}</div><div class="s">${esc(su.label)}</div></div>
+      <div class="bt-stat"><div class="k">ATS cover</div><div class="v">${esc(ats.pct)}</div><div class="s">${esc(ats.label)} (C-F-P)</div></div>
+      <div class="bt-stat"><div class="k">Over hit</div><div class="v">${esc(ou.pct)}</div><div class="s">${esc(ou.label)} (O-U-P)</div></div>
+    </div>`;
+  }
+
+  function compareRow(label, block) {
+    const slice = recPct(block && block.slice);
+    const base = recPct(block && block.baseline);
+    const lift = fmtLift(block && block.liftPts, block && block.liftRel);
+    return `<tr>
+      <td>${esc(label)}</td>
+      <td>${esc(slice.pct)} <span class="muted">${esc(slice.label)}</span></td>
+      <td>${esc(base.pct)} <span class="muted">${esc(base.label)}</span></td>
+      <td class="${liftClass(block && block.liftPts)}">${esc(lift)}</td>
+    </tr>`;
+  }
+
+  function backtestCompare(data) {
+    const league = data.vsLeague || {};
+    const peer = data.vsPeer || {};
+    const team = data.filters && data.filters.team && data.filters.team !== 'ALL';
+    return `<div class="hist-block">
+      <h2>Baseline vs slice</h2>
+      <p class="bt-note">League baseline = all scored games in the year range (home perspective when no team is selected). Lift is slice minus baseline in percentage points.</p>
+      <div class="hist-table-wrap"><table class="hist-table">
+        <thead><tr><th>Market</th><th>Slice</th><th>League</th><th>Lift vs league</th></tr></thead>
+        <tbody>
+          ${compareRow('Outright', league.outright)}
+          ${compareRow('ATS cover', league.ats)}
+          ${compareRow('Over', league.ou)}
+        </tbody>
+      </table></div>
+      ${team ? `<div class="hist-table-wrap" style="margin-top:10px"><table class="hist-table">
+        <thead><tr><th>Market</th><th>Slice</th><th>Team unfiltered</th><th>Lift vs team</th></tr></thead>
+        <tbody>
+          ${compareRow('Outright', peer.outright)}
+          ${compareRow('ATS cover', peer.ats)}
+          ${compareRow('Over', peer.ou)}
+        </tbody>
+      </table></div>` : ''}
+    </div>`;
+  }
+
+  function backtestExpected(data) {
+    const exp = data.expected || {};
+    const ats = recPct(exp.ats);
+    const ou = recPct(exp.ou);
+    const joint = recPct(exp.joint);
+    return `<div class="hist-block">
+      <h2>Expected call accuracy</h2>
+      <p class="bt-note">Same AI Pick logic as Current Week, written as <b>BUF -5.5 and Over</b>. Confidence is the transparent edge/sample rule (51–92). ATS and OU are graded separately; joint requires both correct (a push on either side is a push).</p>
+      <div class="bt-stats">
+        <div class="bt-stat"><div class="k">Avg confidence</div><div class="v">${exp.confidenceAvg != null ? `${esc(exp.confidenceAvg)}%` : '—'}</div></div>
+        <div class="bt-stat"><div class="k">ATS hit</div><div class="v">${esc(ats.pct)}</div><div class="s">${esc(ats.label)}</div></div>
+        <div class="bt-stat"><div class="k">OU hit</div><div class="v">${esc(ou.pct)}</div><div class="s">${esc(ou.label)}</div></div>
+        <div class="bt-stat"><div class="k">Joint ATS+OU</div><div class="v">${esc(joint.pct)}</div><div class="s">${esc(joint.label)}</div></div>
+      </div>
+    </div>`;
+  }
+
+  function backtestPath(data) {
+    const path = data.path || [];
+    if (!path.length) return '';
+    return `<div class="hist-block">
+      <h2>Chain sample path</h2>
+      <div class="bt-path">${path.map((node) => `<div class="bt-node">
+        <div>${esc(node.label || '')}</div>
+        <div class="n">N ${fmtInt(node.n)}</div>
+        <div>${fmtPct(node.stats && node.stats.ats && node.stats.ats.pct)} ATS</div>
+      </div>`).join('')}</div>
+    </div>`;
+  }
+
+  function sortedBacktestGames(rows) {
+    const { key, dir } = state.backtestSort;
+    const copy = [...rows];
+    copy.sort((a, b) => {
+      const av = a[key] == null ? '' : a[key];
+      const bv = b[key] == null ? '' : b[key];
+      let cmp = 0;
+      if (typeof av === 'number' || typeof bv === 'number') cmp = Number(av) - Number(bv);
+      else cmp = String(av).localeCompare(String(bv));
+      if (cmp === 0) cmp = String(a.game_id || '').localeCompare(String(b.game_id || ''));
+      return dir === 'asc' ? cmp : -cmp;
+    });
+    return copy;
+  }
+
+  function hitCell(v) {
+    if (!v) return '—';
+    return `<span class="expected-hit ${esc(v)}">${esc(v)}</span>`;
+  }
+
+  function backtestGamesTable(rows) {
+    const cols = [
+      { key: 'gameDate', label: 'Date' },
+      { key: 'opponent', label: 'Matchup' },
+      { key: 'spreadLabel', label: 'Spread' },
+      { key: 'total_line', label: 'Total' },
+      { key: 'restDays', label: 'Rest' },
+      { key: 'weatherLabel', label: 'Weather' },
+      { key: 'coverLabel', label: 'Cover' },
+      { key: 'ou', label: 'OU' },
+      { key: 'expected', label: 'Expected' },
+      { key: 'confidence', label: 'Conf %' },
+      { key: 'expectedAtsHit', label: 'ATS hit' },
+      { key: 'expectedOuHit', label: 'OU hit' },
+      { key: 'expectedJoint', label: 'Joint' }
+    ];
+    const sorted = sortedBacktestGames(rows);
+    const { key, dir } = state.backtestSort;
+    return `<div class="hist-table-wrap"><table class="hist-table hist-games">
+      <thead><tr>${cols.map((c) => {
+        const on = key === c.key;
+        const caret = on ? `<span class="caret">${dir === 'asc' ? '▲' : '▼'}</span>` : '';
+        return `<th data-bt-sort="${c.key}" class="${on ? 'sorted' : ''}">${c.label}${caret}</th>`;
+      }).join('')}</tr></thead>
+      <tbody>${sorted.map((r) => `<tr>
+        <td>${esc(r.gameDate || '')}</td>
+        <td>${esc(r.opponent || `${r.away_team} @ ${r.home_team}`)}</td>
+        <td>${esc(r.spreadLabel || '—')}</td>
+        <td>${esc(r.total_line == null ? '—' : r.total_line)}</td>
+        <td>${esc(r.restDays == null ? '—' : r.restDays)}</td>
+        <td>${esc(r.weatherLabel || '—')}</td>
+        <td>${esc(r.coverLabel || '—')}</td>
+        <td>${esc(r.ou || '—')}</td>
+        <td>${esc(r.expected || '—')}</td>
+        <td>${r.confidence != null ? `${esc(r.confidence)}%` : '—'}</td>
+        <td>${hitCell(r.expectedAtsHit)}</td>
+        <td>${hitCell(r.expectedOuHit)}</td>
+        <td>${hitCell(r.expectedJoint)}</td>
+      </tr>`).join('')}</tbody>
+    </table></div>`;
+  }
+
+  function downloadBacktestCsv() {
+    const rows = (state.backtest && state.backtest.games) || [];
+    if (!rows.length) return;
+    const headers = ['date','season','week','away','home','focus','spread','total','away_rest','home_rest','weather','roof','site','division','role','last_game','last5_wl','last5_ats','home_score','away_score','outright','cover','ou','expected','confidence','expected_ats_hit','expected_ou_hit','expected_joint'];
+    const escCsv = (v) => {
+      const s = v == null ? '' : String(v);
+      return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const lines = [headers.join(',')];
+    for (const r of rows) {
+      const rec = {
+        date: r.gameDate, season: r.season, week: r.week, away: r.away_team, home: r.home_team,
+        focus: r.team, spread: r.spreadLabel, total: r.total_line, away_rest: r.away_rest, home_rest: r.home_rest,
+        weather: r.weatherLabel, roof: r.roofLabel, site: r.site, division: r.divisionalLabel, role: r.role,
+        last_game: r.lastGame, last5_wl: r.last5wl, last5_ats: r.last5ats, home_score: r.home_score, away_score: r.away_score,
+        outright: r.outright, cover: r.coverLabel, ou: r.ou, expected: r.expected, confidence: r.confidence,
+        expected_ats_hit: r.expectedAtsHit, expected_ou_hit: r.expectedOuHit, expected_joint: r.expectedJoint
+      };
+      lines.push(headers.map((h) => escCsv(rec[h])).join(','));
+    }
+    const blob = new Blob([`${lines.join('\n')}\n`], { type: 'text/csv;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'backtest.csv';
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
+  function backtestView() {
+    let body;
+    if (state.backtestError) body = `<p class="notice">${esc(state.backtestError)}</p>`;
+    else if (state.backtestLoading || !state.backtest) body = '<p class="hist-loading">Loading backtest…</p>';
+    else {
+      const data = state.backtest;
+      const games = data.games || [];
+      body = `${backtestSummary(data)}
+        ${backtestPath(data)}
+        ${backtestCompare(data)}
+        ${backtestExpected(data)}
+        <div class="hist-block">
+          <h2>Matching games</h2>
+          <p class="bt-note">Expected output uses Current Week AI Pick logic. Download includes date, teams, lines, rest, weather, results, and state fields.</p>
+          <button type="button" class="btn-csv" data-bt-csv ${games.length ? '' : 'disabled'}>Download CSV</button>
+          ${games.length ? backtestGamesTable(games) : '<p class="hist-empty">No games match these filters</p>'}
+        </div>`;
+    }
+    return `<section>
+      <h1>Backtest</h1>
+      <p class="lede">Markov-style slices over stored games (2016+) · server-side aggregation</p>
+      ${abbrevKey()}
+      ${backtestFiltersForm()}
+      ${chainBuilder()}
+      ${body}
+    </section>`;
+  }
+
   function historyView() {
     let body;
     if (state.historyError) body = `<p class="notice">${state.historyError}</p>`;
@@ -1033,6 +1470,7 @@
   }
 
   function reloadHistory() {
+    persistHistory();
     state.historyTeam = state.historyFilters.team;
     state.history = null;
     state.historyError = null;
@@ -1045,6 +1483,36 @@
     });
   }
 
+  function readBtForm(form) {
+    const fd = new FormData(form);
+    const next = { ...state.backtestFilters };
+    for (const key of Object.keys(DEFAULT_BT)) {
+      if (!fd.has(key)) continue;
+      let v = fd.get(key);
+      if (key === 'from' || key === 'to') v = Number(v);
+      next[key] = v;
+    }
+    if (next.from > next.to) {
+      const swap = next.from;
+      next.from = next.to;
+      next.to = swap;
+    }
+    return next;
+  }
+
+  function reloadBacktest() {
+    persistBacktest();
+    state.backtest = null;
+    state.backtestError = null;
+    state.backtestLoading = true;
+    render();
+    load().catch((err) => {
+      state.backtestError = (err && err.message) || 'Failed to load backtest';
+      state.backtestLoading = false;
+      render();
+    });
+  }
+
   function render() {
     if (!state.bootstrap) {
       app.innerHTML = '<p>Loading…</p>';
@@ -1053,6 +1521,7 @@
     if (state.page === 'week') app.innerHTML = weekView();
     else if (state.page === 'standings') app.innerHTML = `<section class="panel"><h1>Standings</h1>${standingsTable((state.standings && state.standings.standings) || state.bootstrap.standings || [], true)}</section>`;
     else if (state.page === 'history') app.innerHTML = historyView();
+    else if (state.page === 'backtest') app.innerHTML = backtestView();
     else app.innerHTML = weekView();
 
     app.onclick = async (e) => {
@@ -1062,6 +1531,7 @@
         state.filters[key] = !state.filters[key];
         if (key === 'projOver' && state.filters.projOver) state.filters.projUnder = false;
         if (key === 'projUnder' && state.filters.projUnder) state.filters.projOver = false;
+        persistWeek();
         render();
         return;
       }
@@ -1091,6 +1561,7 @@
       }
       if (e.target.closest('[data-hist-more]')) {
         state.historyMore = !state.historyMore;
+        persistHistory();
         render();
         return;
       }
@@ -1107,6 +1578,55 @@
         reloadHistory();
         return;
       }
+      const btSort = e.target.closest('th[data-bt-sort]');
+      if (btSort && state.page === 'backtest') {
+        const key = btSort.dataset.btSort;
+        if (state.backtestSort.key === key) state.backtestSort.dir = state.backtestSort.dir === 'asc' ? 'desc' : 'asc';
+        else state.backtestSort = { key, dir: key === 'gameDate' ? 'desc' : 'asc' };
+        render();
+        return;
+      }
+      if (e.target.closest('[data-bt-more]')) {
+        state.backtestMore = !state.backtestMore;
+        persistBacktest();
+        render();
+        return;
+      }
+      if (e.target.closest('[data-bt-reset]')) {
+        state.backtestFilters = { ...DEFAULT_BT };
+        state.backtestChain = [];
+        state.backtestMore = false;
+        reloadBacktest();
+        return;
+      }
+      const btClear = e.target.closest('[data-bt-chip-clear]');
+      if (btClear) {
+        const key = btClear.dataset.btChipClear;
+        state.backtestFilters[key] = DEFAULT_BT[key];
+        reloadBacktest();
+        return;
+      }
+      if (e.target.closest('[data-chain-add]')) {
+        const chain = state.backtestChain.length ? [...state.backtestChain] : [{ dim: '', value: 'all' }];
+        chain.push({ dim: '', value: 'all' });
+        state.backtestChain = chain;
+        persistBacktest();
+        render();
+        return;
+      }
+      const chainDel = e.target.closest('[data-chain-del]');
+      if (chainDel) {
+        const i = Number(chainDel.dataset.chainDel);
+        const chain = state.backtestChain.length ? [...state.backtestChain] : [{ dim: '', value: 'all' }];
+        chain.splice(i, 1);
+        state.backtestChain = chain;
+        reloadBacktest();
+        return;
+      }
+      if (e.target.closest('[data-bt-csv]')) {
+        downloadBacktestCsv();
+        return;
+      }
       await onPick(e);
     };
     const histForm = document.getElementById('hist-filters');
@@ -1118,6 +1638,35 @@
         reloadHistory();
       };
     }
+    const btForm = document.getElementById('bt-filters');
+    if (btForm) {
+      btForm.onsubmit = (e) => e.preventDefault();
+      btForm.onchange = () => {
+        state.backtestFilters = readBtForm(btForm);
+        reloadBacktest();
+      };
+    }
+    app.onchange = (e) => {
+      const dimSel = e.target.closest('[data-chain-dim]');
+      if (dimSel) {
+        const i = Number(dimSel.dataset.chainDim);
+        const chain = state.backtestChain.length ? [...state.backtestChain] : [{ dim: '', value: 'all' }];
+        chain[i] = { dim: dimSel.value, value: 'all' };
+        state.backtestChain = chain;
+        persistBacktest();
+        render();
+        return;
+      }
+      const valSel = e.target.closest('[data-chain-val]');
+      if (valSel) {
+        const i = Number(valSel.dataset.chainVal);
+        const chain = state.backtestChain.length ? [...state.backtestChain] : [{ dim: '', value: 'all' }];
+        const dim = chain[i] && chain[i].dim ? chain[i].dim : '';
+        chain[i] = { dim, value: valSel.value };
+        state.backtestChain = chain;
+        reloadBacktest();
+      }
+    };
   }
 
   (async () => {

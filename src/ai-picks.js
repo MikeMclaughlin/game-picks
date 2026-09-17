@@ -2,11 +2,15 @@
 
 function pickPayload(card) {
   const ai = card.aiPick || {};
+  const confidence = ai.confidence == null || ai.confidence === '' ? null : Number(ai.confidence);
   return {
     ats: ai.ats || null,
     ou: ai.ou || null,
     ouText: ai.ouText || null,
     label: ai.label || null,
+    expected: ai.expected || null,
+    confidence: Number.isFinite(confidence) ? confidence : null,
+    atsTeam: ai.atsTeam || null,
     home_team: card.home_team,
     away_team: card.away_team,
     spread_line: card.spread_line == null ? null : Number(card.spread_line),

@@ -169,6 +169,45 @@ function scoringRates(history, team) {
   return { for: scored / games.length, against: allowed / games.length, n: games.length };
 }
 
+function clamp(n, lo, hi) {
+  return Math.min(hi, Math.max(lo, n));
+}
+
+function expectedCallLabel(ats, ou) {
+  const ouWord = ou === 'over' ? 'Over' : ou === 'under' ? 'Under' : null;
+  if (ats && ouWord) return `${ats} and ${ouWord}`;
+  return ats || ouWord || null;
+}
+
+/**
+ * Confidence 51–92 from projection edges and sample size (not a model probability).
+ * Base 52. ATS: +3.5 per |projMargin − spread| (cap +21). OU: +2 per |projTotal − total|
+ * (cap +14). Sample n = min(home games, away games): <8 −10, <16 −5, <30 −2, ≥60 +4.
+ * No-history heuristic (fade totals ≥46): 54; otherwise 52.
+ */
+function aiConfidence(game, projection) {
+  if (!projection || !projection.hasHistory) {
+    return projection && projection.fadeHighTotal ? 54 : 52;
+  }
+  let score = 52;
+  const spread = toNumber(game.spread_line);
+  const total = toNumber(game.total_line);
+  if (spread != null && projection.projMargin != null) {
+    const edge = Math.abs(projection.projMargin - spread);
+    score += Math.min(21, edge * 3.5);
+  }
+  if (total != null && projection.projTotal != null) {
+    const edge = Math.abs(projection.projTotal - total);
+    score += Math.min(14, edge * 2);
+  }
+  const n = Number(projection.sampleN) || 0;
+  if (n < 8) score -= 10;
+  else if (n < 16) score -= 5;
+  else if (n < 30) score -= 2;
+  else if (n >= 60) score += 4;
+  return Math.round(clamp(score, 51, 92));
+}
+
 function projectGame(game, history) {
   const home = scoringRates(history, game.home_team);
   const away = scoringRates(history, game.away_team);
@@ -179,6 +218,7 @@ function projectGame(game, history) {
       projHome: null,
       projAway: null,
       projTotal: null,
+      sampleN: 0,
       fadeHighTotal: total != null && total >= 46,
       ou: total != null && total >= 46 ? 'under' : total != null ? 'over' : null
     };
@@ -199,6 +239,7 @@ function projectGame(game, history) {
     projAway,
     projTotal,
     projMargin,
+    sampleN: Math.min(home.n, away.n),
     fadeHighTotal: false,
     ou,
     atsTeam
@@ -219,11 +260,16 @@ function aiPick(game, projection) {
   if (projection.ou && total != null) {
     ouText = `take the ${projection.ou} ${total}`;
   }
+  const expected = expectedCallLabel(ats, projection.ou);
+  const confidence = aiConfidence(game, projection);
   return {
     ats,
     ou: projection.ou,
     ouText,
-    label: [ats, ouText].filter(Boolean).join(' · ') || null
+    label: [ats, ouText].filter(Boolean).join(' · ') || null,
+    expected,
+    confidence,
+    atsTeam: projection.atsTeam || null
   };
 }
 
@@ -335,6 +381,8 @@ module.exports = {
   scoringRates,
   projectGame,
   aiPick,
+  aiConfidence,
+  expectedCallLabel,
   enrichGame,
   currentSeasonWeek,
   pctLabel,

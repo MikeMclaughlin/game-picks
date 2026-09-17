@@ -87,6 +87,9 @@ test('/api/bootstrap returns JSON week payload', async () => {
     assert.ok(g.home_team);
     assert.ok(g.away_team);
     assert.ok(g.aiPick);
+    assert.equal(typeof g.aiPick.confidence, 'number');
+    assert.ok(g.aiPick.confidence >= 51 && g.aiPick.confidence <= 92);
+    assert.equal(Object.prototype.hasOwnProperty.call(g.aiPick, 'expected'), true);
     assert.equal(Object.prototype.hasOwnProperty.call(g, 'implied'), true);
     assert.equal(Object.prototype.hasOwnProperty.call(g, 'xPts'), true);
     assert.ok(g.home && g.home.city);
@@ -173,8 +176,8 @@ test('/api/history supports filter query params', async () => {
 
   const html = await fetch(`http://127.0.0.1:${port}/`);
   const page = await html.text();
-  assert.match(page, /styles\.css\?v=week-ui-4/);
-  assert.match(page, /app\.js\?v=week-ui-4/);
+  assert.match(page, /styles\.css\?v=backtest-1/);
+  assert.match(page, /app\.js\?v=backtest-1/);
   const appJs = await fetch(`http://127.0.0.1:${port}/app.js`);
   const script = await appJs.text();
   assert.match(script, /function atsPickLabel/);
@@ -193,6 +196,13 @@ test('/api/history supports filter query params', async () => {
   assert.match(script, /card-foot/);
   assert.match(script, /Win % Rest/);
   assert.match(script, /data-hist-game-sort/);
+  assert.match(script, /function backtestView/);
+  assert.match(script, /game-picks:backtest:v1/);
+  assert.match(script, /game-picks:history:v1/);
+  assert.match(script, /game-picks:week:v1/);
+  assert.match(script, /data-bt-csv/);
+  assert.match(script, /ai-conf/);
+  assert.match(script, /N &lt; /);
   assert.match(script, /pickRow\(game, 'ats', game\.away_team, game\.home_team, atsPickLabel/);
   assert.match(script, /data-sel="\$\{esc\(left\)\}"/);
   assert.match(script, /outrightPickLabel\(game\.away_team\)/);
@@ -202,6 +212,8 @@ test('/api/history supports filter query params', async () => {
   assert.doesNotMatch(script, /oauth_apple/);
   assert.match(page, /Social Media sign in/);
   assert.match(page, />Home</);
+  assert.match(page, />Backtest</);
+  assert.match(page, /data-page="backtest"/);
   assert.doesNotMatch(page, /data-page="home"/);
   assert.doesNotMatch(page, />Current Week</);
   assert.doesNotMatch(page, /data-page="rules"/);
@@ -229,6 +241,41 @@ test('favicon.ico is shipped', async () => {
   const res = await fetch(`http://127.0.0.1:${port}/favicon.ico`);
   assert.equal(res.status, 200);
   assert.ok((await res.arrayBuffer()).byteLength > 0);
+  server.close();
+});
+
+test('/api/backtest aggregates history with lift, expected calls, and CSV', async () => {
+  const server = await listen();
+  const { port } = server.address();
+  const res = await fetch(`http://127.0.0.1:${port}/api/backtest?team=SEA&from=2023&to=2024`);
+  const body = await res.json();
+  assert.equal(res.status, 200);
+  assert.equal(body.ok, true);
+  assert.ok(body.n >= 0);
+  assert.equal(body.smallNThreshold, 30);
+  assert.equal(Object.prototype.hasOwnProperty.call(body, 'smallN'), true);
+  assert.ok(body.slice);
+  assert.ok(body.vsLeague);
+  assert.ok(body.expected);
+  assert.ok(Array.isArray(body.games));
+  if (body.games.length) {
+    const g = body.games[0];
+    assert.equal(Object.prototype.hasOwnProperty.call(g, 'expected'), true);
+    assert.equal(Object.prototype.hasOwnProperty.call(g, 'confidence'), true);
+    if (g.expected) assert.match(String(g.expected), / and /);
+  }
+  const chained = await fetch(`http://127.0.0.1:${port}/api/backtest?team=SEA&from=2023&to=2024&chain=site:home,role:underdog`);
+  const chainBody = await chained.json();
+  assert.equal(chained.status, 200);
+  assert.ok(chainBody.n <= body.n);
+  assert.ok(Array.isArray(chainBody.path));
+  assert.ok(chainBody.path.length >= 2);
+  const csvRes = await fetch(`http://127.0.0.1:${port}/api/backtest?team=SEA&from=2023&to=2024&format=csv`);
+  assert.equal(csvRes.status, 200);
+  assert.match(csvRes.headers.get('content-type'), /text\/csv/);
+  const csv = await csvRes.text();
+  assert.match(csv, /date,season,week/);
+  assert.match(csv, /expected,confidence/);
   server.close();
 });
 

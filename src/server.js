@@ -26,6 +26,7 @@ const { validatePick, gradeAll, isLocked, exclusivePartner, assertExclusivePicks
 const { importGames, loadSeedGames, loadSchedule2026, defaultSeasons } = require('./nfl-data');
 const { enrichGame, currentSeasonWeek } = require('./week-view');
 const { parseHistoryFilters, historyPayload } = require('./history');
+const { parseBacktestFilters, parseChain, backtestPayload, backtestCsv } = require('./backtest');
 const { listTeamAbbrs } = require('./teams');
 const { persistAiPicks, listAiPicks } = require('./ai-picks');
 const { historyWindow } = require('./seasons');
@@ -516,6 +517,38 @@ async function handleApi(req, res, url) {
     const maxSeason = seasons.length ? Math.max(...seasons) : 2026;
     const filters = parseHistoryFilters(url.searchParams, { to: maxSeason });
     const payload = historyPayload(games, filters);
+    return json(res, 200, payload);
+  }
+
+  if (pathname === '/api/backtest' && (method === 'GET' || method === 'POST')) {
+    if (sql) await seedIfNeeded(sql);
+    const games = await allGames(sql);
+    const seasons = [...new Set(games.map((g) => Number(g.season)).filter(Number.isFinite))];
+    const maxSeason = seasons.length ? Math.max(...seasons) : 2026;
+    let filters = parseBacktestFilters(url.searchParams, { to: maxSeason });
+    let chain = parseChain(url.searchParams.get('chain'));
+    if (method === 'POST') {
+      const body = await readBody(req);
+      if (body && body.filters) {
+        filters = parseBacktestFilters(body.filters, { to: maxSeason, ...body.filters });
+      }
+      if (body && (body.chain || body.filters)) {
+        chain = parseChain(body.chain != null ? body.chain : url.searchParams.get('chain'));
+      }
+    }
+    const payload = backtestPayload(games, { filters, chain });
+    if (url.searchParams.get('format') === 'csv') {
+      const csv = backtestCsv(payload);
+      const body = Buffer.from(csv, 'utf8');
+      res.writeHead(200, {
+        'content-type': 'text/csv; charset=utf-8',
+        'content-length': body.length,
+        'content-disposition': 'attachment; filename="backtest.csv"',
+        'cache-control': 'no-store'
+      });
+      res.end(body);
+      return;
+    }
     return json(res, 200, payload);
   }
 

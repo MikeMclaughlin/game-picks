@@ -48,11 +48,13 @@ test('persistAiPicks no-ops without sql and pickPayload keeps served AI fields',
     away_team: 'NE',
     spread_line: 3,
     total_line: 44.5,
-    aiPick: { ats: 'SEA -3', ou: 'under', ouText: 'take the under 44.5', label: 'SEA -3 · take the under 44.5' }
+    aiPick: { ats: 'SEA -3', ou: 'under', ouText: 'take the under 44.5', label: 'SEA -3 · take the under 44.5', expected: 'SEA -3 and Under', confidence: 61, atsTeam: 'SEA' }
   });
   assert.equal(payload.ats, 'SEA -3');
   assert.equal(payload.ou, 'under');
   assert.equal(payload.label, 'SEA -3 · take the under 44.5');
+  assert.equal(payload.expected, 'SEA -3 and Under');
+  assert.equal(payload.confidence, 61);
 });
 
 test('history window starts at 2016', () => {
