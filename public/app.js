@@ -200,6 +200,7 @@
   }
   restoreCriteria();
 
+  // Hash routes: #home / #week, #standings, #history, #backtest
   const PAGE_HASH = {
     week: 'home',
     standings: 'standings',

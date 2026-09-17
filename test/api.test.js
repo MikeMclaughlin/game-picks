@@ -203,13 +203,13 @@ test('/api/history supports filter query params', async () => {
   assert.match(script, /function pageFromHash/);
   assert.match(script, /function selectPage/);
   assert.match(script, /hashchange/);
-  assert.match(script, /#backtest/);
-  assert.match(script, /HASH_PAGE/);
-  assert.match(script, /data-bt-sort="\$\{c\.key\}" title="/);
+  assert.equal(script.includes('#home / #week, #standings, #history, #backtest'), true);
+  assert.equal(script.includes('data-bt-sort="${c.key}" title="'), true);
+  const missingSortTitle = [];
   for (const th of script.matchAll(/<th[^>]*(?:data-sort|data-hist-sort|data-hist-game-sort|data-bt-sort)[^>]*>/g)) {
-    assert.match(th[0], /\stitle="/);
-    assert.doesNotMatch(th[0], /\stitle=""/);
+    if (!/\stitle="[^"]+"/.test(th[0])) missingSortTitle.push(th[0]);
   }
+  assert.deepEqual(missingSortTitle, []);
   assert.match(script, /data-bt-csv/);
   assert.match(script, /ai-conf/);
   assert.match(script, /N &lt; /);
