@@ -200,6 +200,82 @@
   }
   restoreCriteria();
 
+  const PAGE_HASH = {
+    week: 'home',
+    standings: 'standings',
+    history: 'history',
+    backtest: 'backtest'
+  };
+  const HASH_PAGE = {
+    home: 'week',
+    week: 'week',
+    standings: 'standings',
+    history: 'history',
+    backtest: 'backtest'
+  };
+
+  function pageFromHash(raw) {
+    const h = String(raw == null ? location.hash : raw).replace(/^#/, '').split(/[/?]/)[0].toLowerCase().trim();
+    return HASH_PAGE[h] || null;
+  }
+
+  function hashForPage(page) {
+    return `#${PAGE_HASH[page] || 'home'}`;
+  }
+
+  function syncLocationHash(page) {
+    const want = hashForPage(page);
+    if (location.hash === want) return;
+    if (page === 'week' && location.hash === '#week') return;
+    const next = `${location.pathname}${location.search}${want}`;
+    if (typeof history.replaceState === 'function') history.replaceState(null, '', next);
+    else location.hash = want;
+  }
+
+  function highlightTabs() {
+    if (!tabs) return;
+    for (const b of tabs.querySelectorAll('button[data-page]')) {
+      b.classList.toggle('on', b.dataset.page === state.page);
+    }
+  }
+
+  function resetPageData(page) {
+    if (page === 'history') {
+      state.history = null;
+      state.historyError = null;
+      state.historyLoading = true;
+    } else if (page === 'backtest') {
+      state.backtest = null;
+      state.backtestError = null;
+      state.backtestLoading = true;
+    } else if (page === 'week') {
+      state.week = null;
+    } else if (page === 'standings') {
+      state.standings = null;
+    }
+  }
+
+  function selectPage(page, opts) {
+    const fromHash = Boolean(opts && opts.fromHash);
+    const next = page === 'home' ? 'week' : page;
+    if (!PAGE_HASH[next]) return;
+    const changed = state.page !== next;
+    if (changed) {
+      state.page = next;
+      resetPageData(next);
+    }
+    if (!fromHash) syncLocationHash(state.page);
+    highlightTabs();
+    if (changed) {
+      render();
+      load().catch(showPageError);
+    }
+  }
+
+  const hashedPage = pageFromHash();
+  if (hashedPage) state.page = hashedPage;
+  highlightTabs();
+
   function esc(s) {
     return String(s == null ? '' : s)
       .replace(/&/g, '&amp;')
@@ -553,23 +629,10 @@
   tabs.addEventListener('click', (e) => {
     const btn = e.target.closest('button[data-page]');
     if (!btn) return;
-    state.page = btn.dataset.page;
-    if (state.page === 'history') {
-      state.history = null;
-      state.historyError = null;
-      state.historyLoading = true;
-    } else if (state.page === 'backtest') {
-      state.backtest = null;
-      state.backtestError = null;
-      state.backtestLoading = true;
-    } else if (state.page === 'week') {
-      state.week = null;
-    } else if (state.page === 'standings') {
-      state.standings = null;
-    }
-    for (const b of tabs.querySelectorAll('button')) b.classList.toggle('on', b === btn);
-    render();
-    load().catch(showPageError);
+    selectPage(btn.dataset.page);
+  });
+  window.addEventListener('hashchange', () => {
+    selectPage(pageFromHash() || 'week', { fromHash: true });
   });
 
   if (signedOutEl) {
@@ -1332,19 +1395,19 @@
 
   function backtestGamesTable(rows) {
     const cols = [
-      { key: 'gameDate', label: 'Date' },
-      { key: 'opponent', label: 'Matchup' },
-      { key: 'spreadLabel', label: 'Spread' },
-      { key: 'total_line', label: 'Total' },
-      { key: 'restDays', label: 'Rest' },
-      { key: 'weatherLabel', label: 'Weather' },
-      { key: 'coverLabel', label: 'Cover' },
-      { key: 'ou', label: 'OU' },
-      { key: 'expected', label: 'Expected' },
-      { key: 'confidence', label: 'Conf %' },
-      { key: 'expectedAtsHit', label: 'ATS hit' },
-      { key: 'expectedOuHit', label: 'OU hit' },
-      { key: 'expectedJoint', label: 'Joint' }
+      { key: 'gameDate', label: 'Date', title: 'Kickoff in America/New_York as YYYY-MM-DD HH:MM EST (literal EST suffix)' },
+      { key: 'opponent', label: 'Matchup', title: 'Opponent or AWAY @ HOME matchup' },
+      { key: 'spreadLabel', label: 'Spread', title: 'Closing spread for the focus team (or home-favored line)' },
+      { key: 'total_line', label: 'Total', title: 'Closing total' },
+      { key: 'restDays', label: 'Rest', title: 'Days of rest for the focus team' },
+      { key: 'weatherLabel', label: 'Weather', title: 'Weather / roof conditions' },
+      { key: 'coverLabel', label: 'Cover', title: 'Spread cover (C), fail (F), or push (P)' },
+      { key: 'ou', label: 'OU', title: 'Over/under result (O, U, or P)' },
+      { key: 'expected', label: 'Expected', title: 'AI expected call (ATS side and Over/Under)' },
+      { key: 'confidence', label: 'Conf %', title: 'Rule-based confidence 51–92 from projection edges and sample size' },
+      { key: 'expectedAtsHit', label: 'ATS hit', title: 'Whether the expected ATS call hit (W, L, or P)' },
+      { key: 'expectedOuHit', label: 'OU hit', title: 'Whether the expected over/under call hit (W, L, or P)' },
+      { key: 'expectedJoint', label: 'Joint', title: 'Joint ATS+OU grade — both must hit; a push on either side is a push' }
     ];
     const sorted = sortedBacktestGames(rows);
     const { key, dir } = state.backtestSort;
@@ -1352,7 +1415,7 @@
       <thead><tr>${cols.map((c) => {
         const on = key === c.key;
         const caret = on ? `<span class="caret">${dir === 'asc' ? '▲' : '▼'}</span>` : '';
-        return `<th data-bt-sort="${c.key}" class="${on ? 'sorted' : ''}">${c.label}${caret}</th>`;
+        return `<th data-bt-sort="${c.key}" title="${esc(c.title)}" class="${on ? 'sorted' : ''}">${c.label}${caret}</th>`;
       }).join('')}</tr></thead>
       <tbody>${sorted.map((r) => `<tr>
         <td>${esc(r.gameDate || '')}</td>

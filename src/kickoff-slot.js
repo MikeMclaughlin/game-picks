@@ -25,6 +25,35 @@ function etParts(iso) {
   };
 }
 
+/**
+ * Kickoff as America/New_York wall time with a literal EST suffix
+ * (even during daylight saving). Example: 2024-09-08 13:00 EST.
+ */
+function formatKickoffEst(iso) {
+  const d = iso instanceof Date ? iso : new Date(iso);
+  if (!Number.isFinite(d.getTime())) return '';
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: TZ,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23'
+  }).formatToParts(d);
+  const get = (type) => {
+    const row = parts.find((p) => p.type === type);
+    return row ? row.value : '';
+  };
+  const year = get('year');
+  const month = get('month');
+  const day = get('day');
+  if (!year || !month || !day) return '';
+  const hour = String(get('hour') || '0').padStart(2, '0');
+  const minute = String(get('minute') || '0').padStart(2, '0');
+  return `${year}-${month}-${day} ${hour}:${minute} EST`;
+}
+
 function weekdayCode(game, parts) {
   if (parts && parts.weekday) return parts.weekday;
   const raw = game && game.weekday;
@@ -52,4 +81,4 @@ function kickoffSlot(game) {
   return 'slot-sun-1';
 }
 
-module.exports = { kickoffSlot, etParts };
+module.exports = { kickoffSlot, etParts, formatKickoffEst };

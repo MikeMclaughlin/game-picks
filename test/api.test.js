@@ -176,8 +176,8 @@ test('/api/history supports filter query params', async () => {
 
   const html = await fetch(`http://127.0.0.1:${port}/`);
   const page = await html.text();
-  assert.match(page, /styles\.css\?v=backtest-1/);
-  assert.match(page, /app\.js\?v=backtest-1/);
+  assert.match(page, /styles\.css\?v=est-hash-1/);
+  assert.match(page, /app\.js\?v=est-hash-1/);
   const appJs = await fetch(`http://127.0.0.1:${port}/app.js`);
   const script = await appJs.text();
   assert.match(script, /function atsPickLabel/);
@@ -200,6 +200,16 @@ test('/api/history supports filter query params', async () => {
   assert.match(script, /game-picks:backtest:v1/);
   assert.match(script, /game-picks:history:v1/);
   assert.match(script, /game-picks:week:v1/);
+  assert.match(script, /function pageFromHash/);
+  assert.match(script, /function selectPage/);
+  assert.match(script, /hashchange/);
+  assert.match(script, /#backtest/);
+  assert.match(script, /HASH_PAGE/);
+  assert.match(script, /data-bt-sort="\$\{c\.key\}" title="/);
+  for (const th of script.matchAll(/<th[^>]*(?:data-sort|data-hist-sort|data-hist-game-sort|data-bt-sort)[^>]*>/g)) {
+    assert.match(th[0], /\stitle="/);
+    assert.doesNotMatch(th[0], /\stitle=""/);
+  }
   assert.match(script, /data-bt-csv/);
   assert.match(script, /ai-conf/);
   assert.match(script, /N &lt; /);
@@ -229,6 +239,9 @@ test('/api/history supports filter query params', async () => {
   assert.match(cssText, /padding: 2px 0 2px 0px;/);
   assert.match(cssText, /\.card\.slot-wed/);
   assert.match(cssText, /\.card\.slot-sat/);
+  assert.match(cssText, /\.bt-stats \{/);
+  assert.match(cssText, /background: #FFB81C/);
+  assert.match(cssText, /\.bt-stat \.v \{ color: #111;/);
 
   server.close();
 });
@@ -263,6 +276,7 @@ test('/api/backtest aggregates history with lift, expected calls, and CSV', asyn
     assert.equal(Object.prototype.hasOwnProperty.call(g, 'expected'), true);
     assert.equal(Object.prototype.hasOwnProperty.call(g, 'confidence'), true);
     if (g.expected) assert.match(String(g.expected), / and /);
+    if (g.gameDate) assert.match(String(g.gameDate), /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} EST$/);
   }
   const chained = await fetch(`http://127.0.0.1:${port}/api/backtest?team=SEA&from=2023&to=2024&chain=site:home,role:underdog`);
   const chainBody = await chained.json();

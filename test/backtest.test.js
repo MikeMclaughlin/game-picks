@@ -115,12 +115,14 @@ test('backtestPayload reports N, small-N flag, lift, expected calls, and CSV', (
   const row = payload.games.find((g) => g.game_id === 'c');
   assert.ok(row.expected);
   assert.match(row.expected, / and /);
+  assert.equal(row.gameDate, '2024-09-22 13:00 EST');
   assert.equal(typeof row.confidence, 'number');
   assert.ok(row.confidence >= 51 && row.confidence <= 92);
   assert.ok(['W', 'L', 'P', null].includes(row.expectedAtsHit) || row.expectedAtsHit == null);
   const csv = backtestCsv(payload);
   assert.match(csv, /date,season,week,away,home/);
   assert.match(csv, /expected,confidence/);
+  assert.match(csv, /2024-09-08 13:00 EST/);
   assert.match(csv, /BUF/);
 });
 
