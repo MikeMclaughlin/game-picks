@@ -2,7 +2,7 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { kickoffSlot } = require('../src/kickoff-slot');
+const { kickoffSlot, formatKickoffEst } = require('../src/kickoff-slot');
 
 test('Wednesday and Saturday kickoffs have their own shade slots', () => {
   assert.equal(kickoffSlot({ kickoff: '2026-09-16T20:15:00-04:00', weekday: 'Wednesday' }), 'slot-wed');
@@ -27,4 +27,10 @@ test('ISO-only kickoffs still classify in America/New_York', () => {
   assert.equal(kickoffSlot('2026-09-13T20:05:00Z'), 'slot-sun-4');
   assert.equal(kickoffSlot('2026-09-14T00:20:00Z'), 'slot-sun-n');
   assert.equal(kickoffSlot('2026-09-15T00:15:00Z'), 'slot-mon');
+});
+
+test('formatKickoffEst uses New York wall time with a literal EST suffix', () => {
+  assert.equal(formatKickoffEst('2024-09-08T17:00:00Z'), '2024-09-08 13:00 EST');
+  assert.equal(formatKickoffEst('2024-12-08T18:00:00Z'), '2024-12-08 13:00 EST');
+  assert.equal(formatKickoffEst('not-a-date'), '');
 });

@@ -232,16 +232,17 @@ th .caret { color: var(--gold); font-size: 10px; margin-left: 4px; }
 
 .bt-stats {
   display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px;
-  margin: 0 0 12px;
+  margin: 0 0 12px; padding: 10px;
+  background: #FFB81C; border: 1px solid #d9a018; border-radius: 8px;
 }
 .bt-stat {
-  background: var(--bg2); border: 1px solid var(--line); border-radius: 6px;
-  padding: 10px 12px;
+  background: #fff6d6; border: 1px solid #c99210; border-radius: 6px;
+  padding: 10px 12px; color: #111;
 }
-.bt-stat .k { color: var(--muted); font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; }
-.bt-stat .v { color: var(--text); font-size: 22px; font-weight: 800; margin-top: 4px; }
-.bt-stat .s { color: var(--muted); font-size: 12px; margin-top: 2px; }
-.bt-stats.small-n .bt-stat .v, .bt-stats.small-n .bt-stat .s { color: #6a6a6a; }
+.bt-stat .k { color: #3a2a00; font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; }
+.bt-stat .v { color: #111; font-size: 22px; font-weight: 800; margin-top: 4px; }
+.bt-stat .s { color: #3a2a00; font-size: 12px; margin-top: 2px; }
+.bt-stats.small-n .bt-stat .v, .bt-stats.small-n .bt-stat .s { color: #5c4a1a; }
 .bt-warn {
   color: var(--amber); font-size: 12px; margin: 0 0 12px;
   padding: 8px 10px; border: 1px solid #5a4318; background: #2a1f0c; border-radius: 6px;

@@ -3,6 +3,7 @@
 const { roadTravel, distanceBucket, sameDivision } = require('./teams');
 const { toNumber, scoresReady, atsLetter } = require('./grader');
 const { resultLetter, projectGame, aiPick } = require('./week-view');
+const { formatKickoffEst } = require('./kickoff-slot');
 const {
   parseHistoryFilters,
   matchesGlobalFilters,
@@ -453,7 +454,7 @@ function enrichObservation(obs, index) {
     game_id: game.game_id,
     season: game.season,
     week: game.week,
-    gameDate: log.gameDate,
+    gameDate: formatKickoffEst(game.kickoff) || log.gameDate,
     kickoff: game.kickoff,
     away_team: game.away_team,
     home_team: game.home_team,
