@@ -24,6 +24,89 @@ function formatLine(n) {
   return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
 }
 
+function roundedTenths(n) {
+  return Math.round(Number(n) * 10) / 10;
+}
+
+function resolveOpening(existingOpen, incomingCurrent) {
+  const stored = toNumber(existingOpen);
+  if (stored != null) return stored;
+  return toNumber(incomingCurrent);
+}
+
+function formatSpreadFavorite(line, home, away) {
+  const n = toNumber(line);
+  if (n == null) return null;
+  if (n === 0) return 'PICK';
+  const fav = n > 0 ? home : away;
+  const abs = formatLine(Math.abs(n));
+  return `${fav} -${abs}`;
+}
+
+function sinceOpenLabel(iso, now = new Date()) {
+  if (!iso) return null;
+  const then = new Date(iso);
+  if (!Number.isFinite(then.getTime())) return null;
+  let ms = now.getTime() - then.getTime();
+  if (ms < 0) ms = 0;
+  const minutes = Math.floor(ms / 60000);
+  const hours = Math.floor(minutes / 60);
+  const days = Math.floor(hours / 24);
+  if (days >= 1) return days === 1 ? 'since 1 day ago' : `since ${days} days ago`;
+  if (hours >= 1) return hours === 1 ? 'since 1 hour ago' : `since ${hours} hours ago`;
+  if (minutes >= 1) return minutes === 1 ? 'since 1 minute ago' : `since ${minutes} minutes ago`;
+  return 'since just now';
+}
+
+function spreadMovement(game, now = new Date()) {
+  const current = toNumber(game.spread_line);
+  const open = toNumber(game.spread_open != null ? game.spread_open : game.spread_line);
+  if (current == null && open == null) return null;
+  const line = current != null ? current : open;
+  const delta = open == null || current == null ? 0 : roundedTenths(current - open);
+  const moved = open != null && current != null && delta !== 0;
+  const toward = !moved ? null : (delta > 0 ? game.home_team : game.away_team);
+  const openFav = open > 0 ? game.home_team : open < 0 ? game.away_team : null;
+  const towardFav = Boolean(moved && openFav && toward === openFav);
+  const tone = !moved ? 'flat' : (towardFav ? 'down' : 'up');
+  return {
+    open,
+    current: line,
+    delta,
+    moved,
+    toward,
+    openLabel: formatSpreadFavorite(open, game.home_team, game.away_team),
+    deltaLabel: moved ? `▲ ${Math.abs(delta).toFixed(1)} toward ${toward}` : 'flat',
+    tone,
+    since: game.spread_open_at || null,
+    sinceLabel: moved ? sinceOpenLabel(game.spread_open_at, now) : null
+  };
+}
+
+function totalMovement(game, now = new Date()) {
+  const current = toNumber(game.total_line);
+  const open = toNumber(game.total_open != null ? game.total_open : game.total_line);
+  if (current == null && open == null) return null;
+  const line = current != null ? current : open;
+  const delta = open == null || current == null ? 0 : roundedTenths(current - open);
+  const moved = open != null && current != null && delta !== 0;
+  const toward = !moved ? null : (delta > 0 ? 'Over' : 'Under');
+  const arrow = delta > 0 ? '▲' : '▼';
+  const tone = !moved ? 'flat' : (delta > 0 ? 'down' : 'up');
+  return {
+    open,
+    current: line,
+    delta,
+    moved,
+    toward,
+    openLabel: formatLine(open),
+    deltaLabel: moved ? `${arrow} ${Math.abs(delta).toFixed(1)} toward ${toward}` : 'flat',
+    tone,
+    since: game.total_open_at || null,
+    sinceLabel: moved ? sinceOpenLabel(game.total_open_at, now) : null
+  };
+}
+
 function formatAtsPick(team, game) {
   const spread = toNumber(game.spread_line);
   if (spread == null) return team;
@@ -338,6 +421,12 @@ function enrichGame(game, history, wagersByGame = {}) {
     away_score: game.away_score,
     spread_line: toNumber(game.spread_line),
     total_line: toNumber(game.total_line),
+    spread_open: toNumber(game.spread_open != null ? game.spread_open : game.spread_line),
+    total_open: toNumber(game.total_open != null ? game.total_open : game.total_line),
+    spread_open_at: game.spread_open_at || null,
+    total_open_at: game.total_open_at || null,
+    spreadMove: spreadMovement(game),
+    totalMove: totalMovement(game),
     implied,
     xPts: {
       away: implied.away,
@@ -376,6 +465,11 @@ module.exports = {
   impliedPoints,
   formatLine,
   formatAtsPick,
+  formatSpreadFavorite,
+  resolveOpening,
+  sinceOpenLabel,
+  spreadMovement,
+  totalMovement,
   kickoffSlot,
   resultLetter,
   scoringRates,

@@ -6,6 +6,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const { handler } = require('../src/server');
+const { BUILD } = require('../src/build');
 
 function listen() {
   const server = http.createServer(handler);
@@ -21,6 +22,7 @@ test('/api/health returns JSON', async () => {
   const body = await res.json();
   assert.equal(res.status, 200);
   assert.equal(body.ok, true);
+  assert.equal(body.build, BUILD);
   assert.equal(body.db, 'missing');
   assert.equal(body.auth, 'missing');
   server.close();
@@ -78,6 +80,7 @@ test('/api/bootstrap returns JSON week payload', async () => {
   const body = await res.json();
   assert.equal(res.status, 200);
   assert.equal(body.ok, true);
+  assert.equal(body.build, BUILD);
   assert.ok(Array.isArray(body.games));
   assert.ok(body.season >= 2023);
   assert.ok(body.week >= 1);
@@ -101,6 +104,19 @@ test('/api/bootstrap returns JSON week payload', async () => {
     assert.equal(Object.prototype.hasOwnProperty.call(g.away, 'shortRestWinPct'), true);
     assert.equal(Object.prototype.hasOwnProperty.call(g.away, 'restWinPct'), true);
     assert.match(String(g.kickoffSlot || ''), /^slot-(wed|thu|sat|sun-1|sun-4|sun-n|mon)$/);
+    assert.equal(Object.prototype.hasOwnProperty.call(g, 'spreadMove'), true);
+    assert.equal(Object.prototype.hasOwnProperty.call(g, 'totalMove'), true);
+    assert.equal(Object.prototype.hasOwnProperty.call(g, 'spread_open'), true);
+    assert.equal(Object.prototype.hasOwnProperty.call(g, 'total_open'), true);
+    if (g.spread_line != null) {
+      assert.equal(g.spreadMove.moved, false);
+      assert.equal(g.spreadMove.deltaLabel, 'flat');
+      assert.equal(g.spreadMove.sinceLabel, null);
+    }
+    if (g.total_line != null) {
+      assert.equal(g.totalMove.moved, false);
+      assert.equal(g.totalMove.deltaLabel, 'flat');
+    }
   }
   server.close();
 });
@@ -176,13 +192,17 @@ test('/api/history supports filter query params', async () => {
 
   const html = await fetch(`http://127.0.0.1:${port}/`);
   const page = await html.text();
-  assert.match(page, /styles\.css\?v=est-hash-1/);
-  assert.match(page, /app\.js\?v=est-hash-1/);
+  assert.match(page, /styles\.css\?v=build-2/);
+  assert.match(page, /app\.js\?v=build-2/);
+  assert.match(page, /Game Picks · build 2/);
+  assert.match(page, /id="build-foot"/);
   const appJs = await fetch(`http://127.0.0.1:${port}/app.js`);
   const script = await appJs.text();
   assert.match(script, /function atsPickLabel/);
   assert.match(script, /function outrightPickLabel/);
   assert.match(script, /function ouPickLabel/);
+  assert.match(script, /function lineMoveHtml/);
+  assert.match(script, /function stackedPick/);
   assert.match(script, /function exclusivePartner/);
   assert.match(script, /Last 5 games/);
   assert.match(script, /Last 5 ATS/);
@@ -235,7 +255,13 @@ test('/api/history supports filter query params', async () => {
   assert.match(page, /__CLERK_CONFIG__/);
   const css = await fetch(`http://127.0.0.1:${port}/styles.css`);
   const cssText = await css.text();
-  assert.match(cssText, /\.picks \{ display: grid; gap: 5px; margin-top: auto; \}/);
+  assert.match(cssText, /\.picks \{ display: grid; gap: 4px; margin-top: auto; \}/);
+  assert.match(cssText, /font-size: 72px/);
+  assert.match(cssText, /\.line-move \{/);
+  assert.match(cssText, /font-size: 18px/);
+  assert.match(cssText, /\.line-delta\.up \{ color: var\(--green\)/);
+  assert.match(cssText, /\.line-delta\.down \{ color: var\(--red\)/);
+  assert.match(cssText, /\.site-foot/);
   assert.match(cssText, /padding: 2px 0 2px 0px;/);
   assert.match(cssText, /\.card\.slot-wed/);
   assert.match(cssText, /\.card\.slot-sat/);

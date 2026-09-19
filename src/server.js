@@ -30,6 +30,7 @@ const { parseBacktestFilters, parseChain, backtestPayload, backtestCsv } = requi
 const { listTeamAbbrs } = require('./teams');
 const { persistAiPicks, listAiPicks } = require('./ai-picks');
 const { historyWindow } = require('./seasons');
+const { BUILD } = require('./build');
 
 const ROOT = path.join(__dirname, '..');
 const PUBLIC = path.join(ROOT, 'public');
@@ -320,6 +321,7 @@ async function handleApi(req, res, url) {
       return json(res, 200, {
         ok: true,
         service: 'game-picks',
+        build: BUILD,
         db: 'missing',
         auth: isClerkConfigured() ? 'ok' : 'missing',
         time: new Date().toISOString()
@@ -330,6 +332,7 @@ async function handleApi(req, res, url) {
       return json(res, 200, {
         ok: true,
         service: 'game-picks',
+        build: BUILD,
         db: dbPing.ok ? 'ok' : 'error',
         database: dbPing.ok ? 'ok' : dbPing.reason,
         auth: isClerkConfigured() ? 'ok' : 'missing',
@@ -339,6 +342,7 @@ async function handleApi(req, res, url) {
       return json(res, 200, {
         ok: true,
         service: 'game-picks',
+        build: BUILD,
         db: 'error',
         database: err.message,
         auth: isClerkConfigured() ? 'ok' : 'missing',
@@ -394,7 +398,8 @@ async function handleApi(req, res, url) {
       games: cards,
       standings: board.slice(0, 8),
       teams: listTeamAbbrs(),
-      rulesVersion: 1
+      rulesVersion: 1,
+      build: BUILD
     });
   }
 

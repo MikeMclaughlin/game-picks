@@ -872,7 +872,42 @@
     return `<div class="stat-rows">${rows.join('')}</div>`;
   }
 
-  function pickRow(game, market, left, right, leftText, rightText) {
+  function stackedPick(top, bottom) {
+    if (bottom == null || bottom === '' || bottom === '—') return esc(top);
+    return `<span class="pick-stack"><span class="pick-abbr">${esc(top)}</span><span class="pick-line">${esc(bottom)}</span></span>`;
+  }
+
+  function atsButtonHtml(game, team) {
+    const pts = signedSpreadPts(game, team);
+    if (pts == null) return esc(team);
+    return stackedPick(team, pts);
+  }
+
+  function ouButtonHtml(game, side) {
+    const total = fmtNum(game.total_line);
+    const letter = side === 'over' ? 'O' : 'U';
+    if (total === '—') return esc(side === 'over' ? 'Over' : 'Under');
+    return stackedPick(letter, total);
+  }
+
+  function lineMoveHtml(move) {
+    if (!move || move.openLabel == null) return '';
+    const open = `<span class="line-open">Open ${esc(move.openLabel)}</span>`;
+    if (!move.moved) {
+      return `<div class="line-move"><div class="line-open-row">${open}</div><div class="line-flat">flat</div></div>`;
+    }
+    const delta = `<span class="line-delta ${esc(move.tone || '')}">${esc(move.deltaLabel)}</span>`;
+    const since = move.sinceLabel
+      ? `<div class="line-since">${esc(move.sinceLabel)}</div>`
+      : '';
+    return `<div class="line-move">
+      <div class="line-open-row">${open}</div>
+      <div class="line-delta-row">${delta}</div>
+      ${since}
+    </div>`;
+  }
+
+  function pickRow(game, market, left, right, leftText, rightText, opts) {
     const labels = { outright: 'OUTRIGHT', ats: 'ATS', ou: 'OU' };
     const current = wagerFor(game, market);
     const locked = game.locked;
@@ -883,15 +918,24 @@
     const on = (val) => current && String(current.selection).toUpperCase() === String(val).toUpperCase();
     const leftLabel = leftText == null ? left : leftText;
     const rightLabel = rightText == null ? right : rightText;
+    const leftInner = opts && opts.leftHtml != null ? opts.leftHtml : esc(leftLabel);
+    const rightInner = opts && opts.rightHtml != null ? opts.rightHtml : esc(rightLabel);
+    const moveHtml = opts && opts.move ? opts.move : '';
+    const lineClass = market === 'ats' || market === 'ou' ? ` line-pick ${market}` : '';
     const reason = locked
       ? 'Locked at kickoff'
       : (blocked && !current
         ? `Clear ${String(partner).toUpperCase()} to pick ${String(market).toUpperCase()}`
         : null);
-    return `<div class="pick${blocked && !current ? ' exclusive-off' : ''}">
+    return `<div class="pick${blocked && !current ? ' exclusive-off' : ''}${lineClass}">
       <label>${labels[market] || market}</label>
-      <button type="button" data-gid="${esc(game.game_id)}" data-market="${market}" data-sel="${esc(left)}" class="${on(left) ? 'on' : ''}" ${disabled ? 'disabled' : ''} title="${esc(reason || `Pick ${leftLabel} ${market}`)}">${esc(leftLabel)}</button>
-      <button type="button" data-gid="${esc(game.game_id)}" data-market="${market}" data-sel="${esc(right)}" class="${on(right) ? 'on' : ''}" ${disabled ? 'disabled' : ''} title="${esc(reason || `Pick ${rightLabel} ${market}`)}">${esc(rightLabel)}</button>
+      <div class="pick-col">
+        <button type="button" data-gid="${esc(game.game_id)}" data-market="${market}" data-sel="${esc(left)}" class="${on(left) ? 'on' : ''}" ${disabled ? 'disabled' : ''} title="${esc(reason || `Pick ${leftLabel} ${market}`)}">${leftInner}</button>
+      </div>
+      <div class="pick-col">
+        <button type="button" data-gid="${esc(game.game_id)}" data-market="${market}" data-sel="${esc(right)}" class="${on(right) ? 'on' : ''}" ${disabled ? 'disabled' : ''} title="${esc(reason || `Pick ${rightLabel} ${market}`)}">${rightInner}</button>
+      </div>
+      ${moveHtml}
     </div>`;
   }
 
@@ -931,8 +975,16 @@
         ${aiRaw ? `<div class="ai"><span>AI Pick:</span> ${esc(aiRaw)}${conf}</div>` : ''}
         <div class="picks">
           ${pickRow(game, 'outright', game.away_team, game.home_team, outrightPickLabel(game.away_team), outrightPickLabel(game.home_team))}
-          ${pickRow(game, 'ats', game.away_team, game.home_team, atsPickLabel(game, game.away_team), atsPickLabel(game, game.home_team))}
-          ${pickRow(game, 'ou', 'over', 'under', ouPickLabel(game, 'over'), ouPickLabel(game, 'under'))}
+          ${pickRow(game, 'ats', game.away_team, game.home_team, atsPickLabel(game, game.away_team), atsPickLabel(game, game.home_team), {
+            leftHtml: atsButtonHtml(game, game.away_team),
+            rightHtml: atsButtonHtml(game, game.home_team),
+            move: lineMoveHtml(game.spreadMove)
+          })}
+          ${pickRow(game, 'ou', 'over', 'under', ouPickLabel(game, 'over'), ouPickLabel(game, 'under'), {
+            leftHtml: ouButtonHtml(game, 'over'),
+            rightHtml: ouButtonHtml(game, 'under'),
+            move: lineMoveHtml(game.totalMove)
+          })}
         </div>
       </div>
     </article>`;
