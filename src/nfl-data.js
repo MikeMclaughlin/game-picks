@@ -268,16 +268,27 @@ ON CONFLICT (game_id) DO UPDATE SET
   updated_at = now()
 `;
 
+function typedParam(idx, cast) {
+  return cast ? `$${idx}::${cast}` : `$${idx}`;
+}
+
 function openingInsertTail(spreadIdx, totalIdx) {
-  return `$${spreadIdx}, $${totalIdx}, CASE WHEN $${spreadIdx} IS NULL THEN NULL ELSE now() END, CASE WHEN $${totalIdx} IS NULL THEN NULL ELSE now() END, now()`;
+  // Cast reused $n params. `CASE WHEN $13 IS NULL` has no type context, so Neon/Postgres
+  // raises 42P08 "could not determine data type of parameter $13" and refresh never lands.
+  const spread = typedParam(spreadIdx, 'numeric');
+  const total = typedParam(totalIdx, 'numeric');
+  return `${spread}, ${total}, CASE WHEN ${spread} IS NULL THEN NULL::timestamptz ELSE now() END, CASE WHEN ${total} IS NULL THEN NULL::timestamptz ELSE now() END, now()`;
+}
+
+function gameValuesClause(base = 0) {
+  const p = (n, cast) => typedParam(base + n, cast);
+  return `(${p(1)},${p(2)},${p(3)},${p(4)},${p(5, 'timestamptz')},${p(6)},${p(7)},${p(8)},${p(9)},${p(10)},${p(11)},${p(12)},${p(13, 'numeric')},${p(14, 'numeric')},${p(15)},${p(16)},${p(17)},${p(18)},${p(19)},${p(20)},${p(21)},${p(22)}, ${openingInsertTail(base + 13, base + 14)})`;
 }
 
 const UPSERT_SQL = `
 INSERT INTO games (
   ${GAME_COLUMNS.join(', ')}, spread_open, total_open, spread_open_at, total_open_at, updated_at
-) VALUES (
-  $1,$2,$3,$4,$5::timestamptz,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22, ${openingInsertTail(13, 14)}
-)
+) VALUES ${gameValuesClause(0)}
 ${UPSERT_CONFLICT}
 `;
 
@@ -310,10 +321,7 @@ function gameParams(g) {
 
 function buildBatchUpsert(batch) {
   const cols = 22;
-  const placeholders = batch.map((_, i) => {
-    const b = i * cols;
-    return `($${b + 1},$${b + 2},$${b + 3},$${b + 4},$${b + 5}::timestamptz,$${b + 6},$${b + 7},$${b + 8},$${b + 9},$${b + 10},$${b + 11},$${b + 12},$${b + 13},$${b + 14},$${b + 15},$${b + 16},$${b + 17},$${b + 18},$${b + 19},$${b + 20},$${b + 21},$${b + 22}, ${openingInsertTail(b + 13, b + 14)})`;
-  }).join(',');
+  const placeholders = batch.map((_, i) => gameValuesClause(i * cols)).join(',');
   const text = `INSERT INTO games (${GAME_COLUMNS.join(', ')}, spread_open, total_open, spread_open_at, total_open_at, updated_at) VALUES ${placeholders} ${UPSERT_CONFLICT}`;
   const params = batch.flatMap(gameParams);
   return { text, params };
@@ -420,6 +428,8 @@ module.exports = {
   UPSERT_SQL,
   UPSERT_CONFLICT,
   openingInsertTail,
+  gameValuesClause,
+  typedParam,
   SEED_PATH,
   SCHEDULE_2026_PATH
 };

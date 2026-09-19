@@ -16,7 +16,7 @@ const { loadSchemaSql } = require('../src/schema');
 
 test('build version is a positive integer', () => {
   assert.equal(typeof BUILD, 'number');
-  assert.ok(BUILD >= 3);
+  assert.ok(BUILD >= 4);
 });
 
 test('resolveOpening keeps the first stored open and takes first current when empty', () => {
@@ -182,9 +182,78 @@ test('upsert SQL updates current lines and never overwrites a stored opening', (
   const { text, params } = buildBatchUpsert(batch);
   assert.match(text, /spread_open, total_open, spread_open_at, total_open_at, updated_at/);
   assert.match(text, /COALESCE\(games\.spread_open/);
+  assert.match(text, /\$13::numeric/);
+  assert.match(text, /\$14::numeric/);
+  assert.match(text, /CASE WHEN \$13::numeric IS NULL THEN NULL::timestamptz ELSE now\(\) END/);
+  assert.match(text, /CASE WHEN \$14::numeric IS NULL THEN NULL::timestamptz ELSE now\(\) END/);
+  assert.doesNotMatch(text, /CASE WHEN \$13 IS NULL/);
+  assert.match(UPSERT_SQL, /\$13::numeric/);
+  assert.match(UPSERT_SQL, /CASE WHEN \$13::numeric IS NULL THEN NULL::timestamptz/);
   assert.equal(params.length, 22);
   assert.equal(params[12], 3);
   assert.equal(params[13], 44.5);
+});
+
+test('batch upsert casts reused line params so null spreads still type as numeric', () => {
+  const batch = [
+    {
+      game_id: 'a',
+      season: 2026,
+      week: 1,
+      game_type: 'REG',
+      kickoff: '2026-09-10T00:00:00-04:00',
+      gameday: '2026-09-10',
+      weekday: 'Thursday',
+      gametime: '20:20',
+      home_team: 'SEA',
+      away_team: 'NE',
+      home_score: null,
+      away_score: null,
+      spread_line: null,
+      total_line: null,
+      home_rest: 7,
+      away_rest: 7,
+      roof: 'outdoors',
+      surface: 'grass',
+      temp: null,
+      wind: null,
+      location: 'Home',
+      overtime: null
+    },
+    {
+      game_id: 'b',
+      season: 2026,
+      week: 2,
+      game_type: 'REG',
+      kickoff: '2026-09-13T13:00:00-04:00',
+      gameday: '2026-09-13',
+      weekday: 'Sunday',
+      gametime: '13:00',
+      home_team: 'KC',
+      away_team: 'BUF',
+      home_score: null,
+      away_score: null,
+      spread_line: -3.5,
+      total_line: 47.5,
+      home_rest: 7,
+      away_rest: 7,
+      roof: 'outdoors',
+      surface: 'grass',
+      temp: 70,
+      wind: 5,
+      location: 'Home',
+      overtime: 0
+    }
+  ];
+  const { text, params } = buildBatchUpsert(batch);
+  assert.match(text, /\$13::numeric/);
+  assert.match(text, /\$35::numeric/);
+  assert.match(text, /CASE WHEN \$35::numeric IS NULL THEN NULL::timestamptz ELSE now\(\) END/);
+  assert.equal(params.length, 44);
+  assert.equal(params[12], null);
+  assert.equal(params[13], null);
+  assert.equal(params[34], -3.5);
+  assert.equal(params[35], 47.5);
 });
 
 test('schema persists opening columns and backfills existing rows', () => {
