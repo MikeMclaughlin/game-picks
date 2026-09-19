@@ -192,9 +192,9 @@ test('/api/history supports filter query params', async () => {
 
   const html = await fetch(`http://127.0.0.1:${port}/`);
   const page = await html.text();
-  assert.match(page, /styles\.css\?v=build-2/);
-  assert.match(page, /app\.js\?v=build-2/);
-  assert.match(page, /Game Picks · build 2/);
+  assert.match(page, /styles\.css\?v=build-3/);
+  assert.match(page, /app\.js\?v=build-3/);
+  assert.match(page, /Game Picks · build 3/);
   assert.match(page, /id="build-foot"/);
   const appJs = await fetch(`http://127.0.0.1:${port}/app.js`);
   const script = await appJs.text();
@@ -256,15 +256,21 @@ test('/api/history supports filter query params', async () => {
   const css = await fetch(`http://127.0.0.1:${port}/styles.css`);
   const cssText = await css.text();
   assert.match(cssText, /\.picks \{ display: grid; gap: 4px; margin-top: auto; \}/);
-  assert.match(cssText, /font-size: 72px/);
+  assert.doesNotMatch(cssText, /font-size: 72px/);
+  assert.match(cssText, /\.week-cards \.pick button \{ font-size: 16px; padding: 8px 10px; \}/);
+  assert.match(cssText, /\.pick-stack \.pick-abbr, \.pick-stack \.pick-line \{ font-size: inherit; \}/);
   assert.match(cssText, /\.line-move \{/);
-  assert.match(cssText, /font-size: 18px/);
+  assert.match(cssText, /font-size: 12px; line-height: 1\.25;/);
   assert.match(cssText, /\.line-delta\.up \{ color: var\(--green\)/);
   assert.match(cssText, /\.line-delta\.down \{ color: var\(--red\)/);
   assert.match(cssText, /\.site-foot/);
   assert.match(cssText, /padding: 2px 0 2px 0px;/);
-  assert.match(cssText, /\.card\.slot-wed/);
-  assert.match(cssText, /\.card\.slot-sat/);
+  assert.match(cssText, /--card: #222222;/);
+  assert.match(cssText, /--line: #3a3a3a;/);
+  assert.match(cssText, /linear-gradient\(180deg, var\(--card-top\) 0%, var\(--card-bot\) 100%\)/);
+  assert.match(cssText, /\.card\.slot-wed \{ --card-top: #606060; --card-bot: #4c4c4c; \}/);
+  assert.match(cssText, /\.card\.slot-sat \{ --card-top: #4a4a4a; --card-bot: #363636; \}/);
+  assert.match(cssText, /\.card\.slot-mon \{ --card-top: #2d2d2d; --card-bot: #1c1c1c; \}/);
   assert.match(cssText, /\.bt-stats \{/);
   assert.match(cssText, /background: #FFB81C/);
   assert.match(cssText, /\.bt-stat \.v \{ color: #111;/);
