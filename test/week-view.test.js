@@ -50,6 +50,7 @@ test('upsert SQL coalesces scores and lines', () => {
   assert.match(UPSERT_SQL, /away_score = COALESCE\(EXCLUDED\.away_score, games\.away_score\)/);
   assert.match(UPSERT_SQL, /spread_line = COALESCE\(EXCLUDED\.spread_line, games\.spread_line\)/);
   assert.match(UPSERT_SQL, /total_line = COALESCE\(EXCLUDED\.total_line, games\.total_line\)/);
+  assert.match(UPSERT_SQL, /spread_open = COALESCE\(games\.spread_open/);
 });
 
 test('current week prefers upcoming kickoff', () => {
@@ -183,6 +184,10 @@ test('enrichGame exposes lastGame, city, short rest, and xPts from the line', ()
   assert.ok(card.aiPick.confidence >= 51 && card.aiPick.confidence <= 92);
   assert.ok(card.aiPick.expected);
   assert.match(card.aiPick.expected, / and /);
+  assert.equal(card.spread_open, 5.5);
+  assert.equal(card.total_open, 54.5);
+  assert.equal(card.spreadMove.moved, false);
+  assert.equal(card.totalMove.moved, false);
 });
 
 test('last-5 streaks are oldest-to-newest and skip ties/pushes', () => {

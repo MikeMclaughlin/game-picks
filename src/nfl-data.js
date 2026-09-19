@@ -245,6 +245,18 @@ ON CONFLICT (game_id) DO UPDATE SET
   away_score = COALESCE(EXCLUDED.away_score, games.away_score),
   spread_line = COALESCE(EXCLUDED.spread_line, games.spread_line),
   total_line = COALESCE(EXCLUDED.total_line, games.total_line),
+  spread_open = COALESCE(games.spread_open, EXCLUDED.spread_open, EXCLUDED.spread_line),
+  total_open = COALESCE(games.total_open, EXCLUDED.total_open, EXCLUDED.total_line),
+  spread_open_at = CASE
+    WHEN games.spread_open IS NOT NULL THEN games.spread_open_at
+    WHEN COALESCE(EXCLUDED.spread_open, EXCLUDED.spread_line) IS NOT NULL THEN COALESCE(EXCLUDED.spread_open_at, now())
+    ELSE games.spread_open_at
+  END,
+  total_open_at = CASE
+    WHEN games.total_open IS NOT NULL THEN games.total_open_at
+    WHEN COALESCE(EXCLUDED.total_open, EXCLUDED.total_line) IS NOT NULL THEN COALESCE(EXCLUDED.total_open_at, now())
+    ELSE games.total_open_at
+  END,
   home_rest = COALESCE(EXCLUDED.home_rest, games.home_rest),
   away_rest = COALESCE(EXCLUDED.away_rest, games.away_rest),
   roof = COALESCE(EXCLUDED.roof, games.roof),
@@ -256,11 +268,15 @@ ON CONFLICT (game_id) DO UPDATE SET
   updated_at = now()
 `;
 
+function openingInsertTail(spreadIdx, totalIdx) {
+  return `$${spreadIdx}, $${totalIdx}, CASE WHEN $${spreadIdx} IS NULL THEN NULL ELSE now() END, CASE WHEN $${totalIdx} IS NULL THEN NULL ELSE now() END, now()`;
+}
+
 const UPSERT_SQL = `
 INSERT INTO games (
-  ${GAME_COLUMNS.join(', ')}, updated_at
+  ${GAME_COLUMNS.join(', ')}, spread_open, total_open, spread_open_at, total_open_at, updated_at
 ) VALUES (
-  $1,$2,$3,$4,$5::timestamptz,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22, now()
+  $1,$2,$3,$4,$5::timestamptz,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22, ${openingInsertTail(13, 14)}
 )
 ${UPSERT_CONFLICT}
 `;
@@ -296,9 +312,9 @@ function buildBatchUpsert(batch) {
   const cols = 22;
   const placeholders = batch.map((_, i) => {
     const b = i * cols;
-    return `($${b + 1},$${b + 2},$${b + 3},$${b + 4},$${b + 5}::timestamptz,$${b + 6},$${b + 7},$${b + 8},$${b + 9},$${b + 10},$${b + 11},$${b + 12},$${b + 13},$${b + 14},$${b + 15},$${b + 16},$${b + 17},$${b + 18},$${b + 19},$${b + 20},$${b + 21},$${b + 22}, now())`;
+    return `($${b + 1},$${b + 2},$${b + 3},$${b + 4},$${b + 5}::timestamptz,$${b + 6},$${b + 7},$${b + 8},$${b + 9},$${b + 10},$${b + 11},$${b + 12},$${b + 13},$${b + 14},$${b + 15},$${b + 16},$${b + 17},$${b + 18},$${b + 19},$${b + 20},$${b + 21},$${b + 22}, ${openingInsertTail(b + 13, b + 14)})`;
   }).join(',');
-  const text = `INSERT INTO games (${GAME_COLUMNS.join(', ')}, updated_at) VALUES ${placeholders} ${UPSERT_CONFLICT}`;
+  const text = `INSERT INTO games (${GAME_COLUMNS.join(', ')}, spread_open, total_open, spread_open_at, total_open_at, updated_at) VALUES ${placeholders} ${UPSERT_CONFLICT}`;
   const params = batch.flatMap(gameParams);
   return { text, params };
 }
@@ -402,6 +418,8 @@ module.exports = {
   defaultSeasons,
   HISTORY_FROM_SEASON,
   UPSERT_SQL,
+  UPSERT_CONFLICT,
+  openingInsertTail,
   SEED_PATH,
   SCHEDULE_2026_PATH
 };

@@ -12,6 +12,8 @@ test('schema SQL is bundled and splits into statements', () => {
   assert.match(text, /CREATE TABLE IF NOT EXISTS ai_picks/);
   assert.match(text, /clerk_user_id/);
   assert.match(text, /ADD COLUMN IF NOT EXISTS clerk_user_id/);
+  assert.match(text, /ADD COLUMN IF NOT EXISTS spread_open NUMERIC/);
+  assert.match(text, /ADD COLUMN IF NOT EXISTS total_open NUMERIC/);
   const stmts = splitSqlStatements(text);
   assert.ok(stmts.length >= 8);
 });
@@ -46,7 +48,9 @@ test('batch upsert keeps COALESCE for scores and lines', () => {
   const { text, params } = buildBatchUpsert(batch);
   assert.match(text, /home_score = COALESCE\(EXCLUDED\.home_score, games\.home_score\)/);
   assert.match(text, /spread_line = COALESCE\(EXCLUDED\.spread_line, games\.spread_line\)/);
+  assert.match(text, /spread_open = COALESCE\(games\.spread_open, EXCLUDED\.spread_open, EXCLUDED\.spread_line\)/);
   assert.match(UPSERT_SQL, /total_line = COALESCE\(EXCLUDED\.total_line, games\.total_line\)/);
+  assert.match(UPSERT_SQL, /total_open = COALESCE\(games\.total_open, EXCLUDED\.total_open, EXCLUDED\.total_line\)/);
   assert.equal(params[0], 'a');
   assert.equal(params.length, 22);
 });

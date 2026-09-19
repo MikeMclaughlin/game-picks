@@ -40,6 +40,10 @@ CREATE TABLE IF NOT EXISTS games (
   away_score INT,
   spread_line NUMERIC,
   total_line NUMERIC,
+  spread_open NUMERIC,
+  total_open NUMERIC,
+  spread_open_at TIMESTAMPTZ,
+  total_open_at TIMESTAMPTZ,
   home_rest INT,
   away_rest INT,
   roof TEXT,
@@ -56,6 +60,23 @@ CREATE INDEX IF NOT EXISTS games_season_week_kickoff_idx
 
 CREATE INDEX IF NOT EXISTS games_teams_idx
   ON games (home_team, away_team, kickoff);
+
+ALTER TABLE games ADD COLUMN IF NOT EXISTS spread_open NUMERIC;
+ALTER TABLE games ADD COLUMN IF NOT EXISTS total_open NUMERIC;
+ALTER TABLE games ADD COLUMN IF NOT EXISTS spread_open_at TIMESTAMPTZ;
+ALTER TABLE games ADD COLUMN IF NOT EXISTS total_open_at TIMESTAMPTZ;
+
+UPDATE games
+SET
+  spread_open = spread_line,
+  spread_open_at = COALESCE(spread_open_at, updated_at)
+WHERE spread_open IS NULL AND spread_line IS NOT NULL;
+
+UPDATE games
+SET
+  total_open = total_line,
+  total_open_at = COALESCE(total_open_at, updated_at)
+WHERE total_open IS NULL AND total_line IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS wagers (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
