@@ -192,9 +192,9 @@ test('/api/history supports filter query params', async () => {
 
   const html = await fetch(`http://127.0.0.1:${port}/`);
   const page = await html.text();
-  assert.match(page, /styles\.css\?v=build-3/);
-  assert.match(page, /app\.js\?v=build-3/);
-  assert.match(page, /Game Picks · build 3/);
+  assert.match(page, new RegExp(`styles\\.css\\?v=build-${BUILD}`));
+  assert.match(page, new RegExp(`app\\.js\\?v=build-${BUILD}`));
+  assert.match(page, new RegExp(`Game Picks · build ${BUILD}`));
   assert.match(page, /id="build-foot"/);
   const appJs = await fetch(`http://127.0.0.1:${port}/app.js`);
   const script = await appJs.text();
