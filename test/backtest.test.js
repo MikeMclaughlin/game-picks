@@ -122,8 +122,11 @@ test('backtestPayload reports N, small-N flag, lift, expected calls, and CSV', (
   const csv = backtestCsv(payload);
   assert.match(csv, /date,season,week,away,home/);
   assert.match(csv, /expected,confidence/);
+  assert.doesNotMatch(csv, /expected_joint/);
   assert.match(csv, /2024-09-08 13:00 EST/);
   assert.match(csv, /BUF/);
+  assert.equal(row.matchup, 'NYJ @ BUF');
+  assert.equal(row.opponent, 'NYJ @ BUF');
 });
 
 test('chain last-game win shrinks the slice versus the year baseline', () => {

@@ -44,7 +44,9 @@ button, input, select { font: inherit; color: inherit; }
   background: #1a1a1a; border: 1px solid var(--line); color: var(--text);
   padding: 5px 9px; border-radius: 4px; cursor: pointer;
 }
-.chip.on, .pick button.on { background: var(--gold); color: #111; border-color: var(--gold); font-weight: 700; }
+.chip.on, .pick button.on, .filter-chip.on, .hist-row label.on select, .hist-row select.on, .bt-step select.on {
+  background: var(--gold); color: #111; border-color: var(--gold); font-weight: 700;
+}
 .login { display: flex; gap: 6px; align-items: center; margin-left: auto; }
 .login input, select {
   background: #0b0b0b; border: 1px solid var(--line); padding: 5px 8px; border-radius: 4px;
@@ -152,7 +154,7 @@ h1, h2 { margin: 0 0 8px; font-size: 22px; font-weight: 700; letter-spacing: 0.0
 }
 .ai span { color: var(--gold); font-weight: 700; }
 .ai-conf {
-  display: inline-block; margin-left: 8px; color: var(--gold); font-weight: 800;
+  display: inline; margin-left: 0; color: var(--gold); font-weight: 800;
   font-variant-numeric: tabular-nums;
 }
 .picks { display: grid; gap: 4px; margin-top: auto; }
@@ -233,6 +235,9 @@ th .caret { color: var(--gold); font-size: 10px; margin-left: 4px; }
   border: 1px solid var(--gold); background: #0a0a0a; color: var(--text);
   min-width: 108px; padding: 6px 8px;
 }
+.hist-row label.on select, .hist-row select.on {
+  background: var(--gold); color: #111; border-color: var(--gold); font-weight: 700;
+}
 .hist-actions { margin-left: auto; display: flex; gap: 8px; align-items: center; }
 .btn-more, .btn-reset {
   background: transparent; border: 1px solid var(--gold); color: var(--gold);
@@ -247,7 +252,10 @@ th .caret { color: var(--gold); font-size: 10px; margin-left: 4px; }
   background: transparent; border: 1px solid var(--gold); color: var(--gold);
   padding: 3px 8px; border-radius: 999px; cursor: pointer; font-size: 12px;
 }
-.filter-chip:hover { background: var(--gold); color: #111; }
+.filter-chip.on {
+  background: var(--gold); color: #111; border-color: var(--gold); font-weight: 700;
+}
+.filter-chip:hover, .filter-chip.on:hover { background: var(--amber); color: #111; border-color: var(--amber); }
 .hist-hint { color: var(--muted); font-size: 12px; margin: 0 0 10px; }
 .hist-empty, .hist-loading { color: var(--muted); padding: 18px 4px; }
 .hist-table-wrap { overflow-x: auto; }
@@ -281,6 +289,7 @@ th .caret { color: var(--gold); font-size: 10px; margin-left: 4px; }
 .bt-chain h2 { font-size: 14px; margin: 0; color: var(--gold); }
 .bt-step { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .bt-step select { min-width: 140px; border: 1px solid var(--gold); background: #0a0a0a; }
+.bt-step select.on { background: var(--gold); color: #111; border-color: var(--gold); font-weight: 700; }
 .bt-step .bt-arrow { color: var(--gold); font-weight: 800; }
 .btn-add, .btn-csv {
   background: transparent; border: 1px solid var(--gold); color: var(--gold);

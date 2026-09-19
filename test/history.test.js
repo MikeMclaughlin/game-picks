@@ -106,6 +106,8 @@ test('teamHistory applies filters before aggregation', () => {
   ];
   const all = teamHistory(games, 'SEA', { filters: parseHistoryFilters({ team: 'SEA', from: 2023, to: 2024 }) });
   assert.equal(all.rows[0].games, 3);
+  assert.equal(all.rows[0].favorite.label, '2-0');
+  assert.equal(all.rows[0].dog.label, '0-1');
   const home = teamHistory(games, 'SEA', { filters: parseHistoryFilters({ team: 'SEA', from: 2023, to: 2024, site: 'home' }) });
   assert.equal(home.rows[0].games, 2);
   assert.equal(home.rows[0].road.wins + home.rows[0].road.losses, 0);
@@ -122,6 +124,10 @@ test('historyPayload reports supported filters and empty rows when none match', 
   assert.equal(payload.supported.division, true);
   assert.equal(payload.supported.gameDate, true);
   assert.equal(payload.supported.divisional, true);
+  assert.equal(payload.supported.favorite, true);
+  assert.equal(payload.supported.dog, true);
+  assert.ok(payload.notes.favorite);
+  assert.ok(payload.notes.dog);
   assert.ok(payload.notes.distance);
 });
 
