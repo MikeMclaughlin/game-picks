@@ -949,7 +949,7 @@
     const aiRaw = pick.expected
       || (pick.label ? pick.label.replace(/^AI Pick:\s*/i, '').trim() : '');
     const conf = pick.confidence != null && Number.isFinite(Number(pick.confidence))
-      ? `<span class="ai-conf" title="Rule-based confidence 51–92 from ATS/OU projection edges and prior sample size — not a model probability.">${esc(String(Math.round(Number(pick.confidence))))}%</span>`
+      ? `<span class="ai-conf" title="Rule-based confidence 51–92 from ATS/OU projection edges and prior sample size — not a model probability."> · ${esc(String(Math.round(Number(pick.confidence))))}% confidence</span>`
       : '';
     const awayCity = (game.away && game.away.city) || game.away_team;
     const homeCity = (game.home && game.home.city) || game.home_team;
@@ -1098,6 +1098,15 @@
     return r && r.label ? r.label : '0-0';
   }
 
+  function filterOn(filters, defaults, key) {
+    return String(filters[key]) !== String(defaults[key]);
+  }
+
+  function filterField(label, name, title, options, filters, defaults) {
+    const on = filterOn(filters, defaults, name) ? 'on' : '';
+    return `<label class="${on}">${label} <select name="${name}" class="${on}" title="${esc(title)}">${optList(options, filters[name])}</select></label>`;
+  }
+
   function optList(options, selected) {
     return options.map((o) => {
       const value = typeof o === 'object' ? o.value : o;
@@ -1167,25 +1176,25 @@
     const chips = activeHistChips();
     return `<form id="hist-filters" class="hist-bar">
       <div class="hist-row">
-        <label>Team <select name="team" title="Filter splits to one team">${optList(teams, f.team)}</select></label>
-        <label>From year <select name="from" title="Inclusive start season">${optList(years, f.from)}</select></label>
-        <label>To year <select name="to" title="Inclusive end season">${optList(years, f.to)}</select></label>
-        <label>Site <select name="site" title="Home or road games for the team">${optList([{ value: 'all', label: 'All' }, { value: 'home', label: 'Home' }, { value: 'road', label: 'Road' }], f.site)}</select></label>
-        <label>Weather <select name="weather" title="Cold ≤40°F, windy 15+ mph, fair outdoor otherwise">${optList([{ value: 'all', label: 'All' }, { value: 'cold', label: 'Cold' }, { value: 'windy', label: 'Windy' }, { value: 'fair', label: 'Fair' }], f.weather)}</select></label>
-        <label>Travel <select name="travel" title="Road games crossing 2+ time zones">${optList([{ value: 'all', label: 'All' }, { value: 'east', label: 'East' }, { value: 'west', label: 'West' }], f.travel)}</select></label>
+        ${filterField('Team', 'team', 'Filter splits to one team', teams, f, DEFAULT_HIST)}
+        ${filterField('From year', 'from', 'Inclusive start season', years, f, DEFAULT_HIST)}
+        ${filterField('To year', 'to', 'Inclusive end season', years, f, DEFAULT_HIST)}
+        ${filterField('Site', 'site', 'Home or road games for the team', [{ value: 'all', label: 'All' }, { value: 'home', label: 'Home' }, { value: 'road', label: 'Road' }], f, DEFAULT_HIST)}
+        ${filterField('Weather', 'weather', 'Cold ≤40°F, windy 15+ mph, fair outdoor otherwise', [{ value: 'all', label: 'All' }, { value: 'cold', label: 'Cold' }, { value: 'windy', label: 'Windy' }, { value: 'fair', label: 'Fair' }], f, DEFAULT_HIST)}
+        ${filterField('Travel', 'travel', 'Road games crossing 2+ time zones', [{ value: 'all', label: 'All' }, { value: 'east', label: 'East' }, { value: 'west', label: 'West' }], f, DEFAULT_HIST)}
         <div class="hist-actions">
           <button type="button" class="btn-more" data-hist-more aria-expanded="${moreOpen ? 'true' : 'false'}">${moreOpen ? 'Fewer filters' : 'More filters'}</button>
           <button type="button" class="btn-reset" data-hist-reset>Reset</button>
         </div>
       </div>
       <div class="hist-row" id="hist-more" ${moreOpen ? '' : 'hidden'}>
-        <label>Distance <select name="distance" title="Local = 0–1 time zones; cross-country = 2+">${optList([{ value: 'all', label: 'All' }, { value: 'local', label: 'Local' }, { value: 'cross', label: 'Cross-country' }], f.distance)}</select></label>
-        <label>Roof <select name="roof" title="Dome, outdoor, or retractable (open/closed)">${optList([{ value: 'all', label: 'All' }, { value: 'dome', label: 'Dome' }, { value: 'outdoor', label: 'Outdoor' }, { value: 'retractable', label: 'Retractable' }], f.roof)}</select></label>
-        <label>Role <select name="role" title="Favorite or underdog from the spread">${optList([{ value: 'all', label: 'All' }, { value: 'favorite', label: 'Favorite' }, { value: 'underdog', label: 'Underdog' }], f.role)}</select></label>
-        <label>Division <select name="division" title="Same-division opponents">${optList([{ value: 'all', label: 'All' }, { value: 'divisional', label: 'Divisional' }, { value: 'non-div', label: 'Non-div' }], f.division)}</select></label>
-        <label>Days off <select name="daysOff" title="Short rest ≤5 days, bye+ ≥11, else normal">${optList([{ value: 'all', label: 'All' }, { value: 'short', label: 'Short rest' }, { value: 'normal', label: 'Normal' }, { value: 'bye', label: 'Bye+' }], f.daysOff)}</select></label>
+        ${filterField('Distance', 'distance', 'Local = 0–1 time zones; cross-country = 2+', [{ value: 'all', label: 'All' }, { value: 'local', label: 'Local' }, { value: 'cross', label: 'Cross-country' }], f, DEFAULT_HIST)}
+        ${filterField('Roof', 'roof', 'Dome, outdoor, or retractable (open/closed)', [{ value: 'all', label: 'All' }, { value: 'dome', label: 'Dome' }, { value: 'outdoor', label: 'Outdoor' }, { value: 'retractable', label: 'Retractable' }], f, DEFAULT_HIST)}
+        ${filterField('Role', 'role', 'Favorite or underdog from the spread', [{ value: 'all', label: 'All' }, { value: 'favorite', label: 'Favorite' }, { value: 'underdog', label: 'Underdog' }], f, DEFAULT_HIST)}
+        ${filterField('Division', 'division', 'Same-division opponents', [{ value: 'all', label: 'All' }, { value: 'divisional', label: 'Divisional' }, { value: 'non-div', label: 'Non-div' }], f, DEFAULT_HIST)}
+        ${filterField('Days off', 'daysOff', 'Short rest ≤5 days, bye+ ≥11, else normal', [{ value: 'all', label: 'All' }, { value: 'short', label: 'Short rest' }, { value: 'normal', label: 'Normal' }, { value: 'bye', label: 'Bye+' }], f, DEFAULT_HIST)}
       </div>
-      ${chips.length ? `<div class="hist-chips">${chips.map((c) => `<button type="button" class="filter-chip" data-chip-clear="${c.key}" title="Clear ${c.text}">${c.text} ×</button>`).join('')}</div>` : ''}
+      ${chips.length ? `<div class="hist-chips">${chips.map((c) => `<button type="button" class="filter-chip on" data-chip-clear="${c.key}" title="Clear ${c.text}">${c.text} ×</button>`).join('')}</div>` : ''}
     </form>
     <p class="hist-hint">Filters narrow the schedule seed; table updates as you change them.</p>`;
   }
@@ -1197,7 +1206,9 @@
       { key: 'ats', label: 'ATS', title: 'Against the spread record' },
       { key: 'ou', label: 'O/U', title: 'Over/under record (overs-unders-pushes)' },
       { key: 'home', label: 'Home', title: 'Straight-up home record in the filtered set' },
-      { key: 'road', label: 'Road', title: 'Straight-up road record in the filtered set' }
+      { key: 'road', label: 'Road', title: 'Straight-up road record in the filtered set' },
+      { key: 'favorite', label: 'Favorite', title: 'Straight-up wins-losses when the team is a favorite' },
+      { key: 'dog', label: 'Underdog', title: 'Straight-up wins-losses when the team is an underdog' }
     ];
     const sorted = sortedHistoryRows(rows);
     const { key, dir } = state.historySort;
@@ -1214,6 +1225,8 @@
         <td>${rec(r?.ou)}</td>
         <td>${rec(r?.home)}</td>
         <td>${rec(r?.road)}</td>
+        <td>${rec(r?.favorite)}</td>
+        <td>${rec(r?.dog)}</td>
       </tr>`).join('')}</tbody>
     </table></div>`;
   }
@@ -1281,27 +1294,27 @@
     const chips = activeBtChips();
     return `<form id="bt-filters" class="hist-bar">
       <div class="hist-row">
-        <label>Team <select name="team" title="Team-relative slice">${optList(teams, f.team)}</select></label>
-        <label>From year <select name="from">${optList(years, f.from)}</select></label>
-        <label>To year <select name="to">${optList(years, f.to)}</select></label>
-        <label>Site <select name="site">${optList([{ value: 'all', label: 'All' }, { value: 'home', label: 'Home' }, { value: 'road', label: 'Road' }], f.site)}</select></label>
-        <label>Weather <select name="weather">${optList([{ value: 'all', label: 'All' }, { value: 'cold', label: 'Cold' }, { value: 'windy', label: 'Windy' }, { value: 'fair', label: 'Fair' }], f.weather)}</select></label>
-        <label>Travel <select name="travel">${optList([{ value: 'all', label: 'All' }, { value: 'east', label: 'East' }, { value: 'west', label: 'West' }], f.travel)}</select></label>
+        ${filterField('Team', 'team', 'Team-relative slice', teams, f, DEFAULT_BT)}
+        ${filterField('From year', 'from', 'Inclusive start season', years, f, DEFAULT_BT)}
+        ${filterField('To year', 'to', 'Inclusive end season', years, f, DEFAULT_BT)}
+        ${filterField('Site', 'site', 'Home or road games for the team', [{ value: 'all', label: 'All' }, { value: 'home', label: 'Home' }, { value: 'road', label: 'Road' }], f, DEFAULT_BT)}
+        ${filterField('Weather', 'weather', 'Cold ≤40°F, windy 15+ mph, fair outdoor otherwise', [{ value: 'all', label: 'All' }, { value: 'cold', label: 'Cold' }, { value: 'windy', label: 'Windy' }, { value: 'fair', label: 'Fair' }], f, DEFAULT_BT)}
+        ${filterField('Travel', 'travel', 'Road games crossing 2+ time zones', [{ value: 'all', label: 'All' }, { value: 'east', label: 'East' }, { value: 'west', label: 'West' }], f, DEFAULT_BT)}
         <div class="hist-actions">
           <button type="button" class="btn-more" data-bt-more aria-expanded="${moreOpen ? 'true' : 'false'}">${moreOpen ? 'Fewer filters' : 'More filters'}</button>
           <button type="button" class="btn-reset" data-bt-reset>Reset</button>
         </div>
       </div>
       <div class="hist-row" id="bt-more" ${moreOpen ? '' : 'hidden'}>
-        <label>Distance <select name="distance">${optList([{ value: 'all', label: 'All' }, { value: 'local', label: 'Local' }, { value: 'cross', label: 'Cross-country' }], f.distance)}</select></label>
-        <label>Roof <select name="roof">${optList([{ value: 'all', label: 'All' }, { value: 'dome', label: 'Dome' }, { value: 'outdoor', label: 'Outdoor' }, { value: 'retractable', label: 'Retractable' }], f.roof)}</select></label>
-        <label>Role <select name="role">${optList([{ value: 'all', label: 'All' }, { value: 'favorite', label: 'Favorite' }, { value: 'underdog', label: 'Underdog' }], f.role)}</select></label>
-        <label>Division <select name="division">${optList([{ value: 'all', label: 'All' }, { value: 'divisional', label: 'Divisional' }, { value: 'non-div', label: 'Non-div' }], f.division)}</select></label>
-        <label>Days off <select name="daysOff">${optList([{ value: 'all', label: 'All' }, { value: 'short', label: 'Short rest' }, { value: 'normal', label: 'Normal' }, { value: 'bye', label: 'Bye+' }], f.daysOff)}</select></label>
-        <label>Spread size <select name="spread" title="|spread_line| buckets">${optList([{ value: 'all', label: 'All' }, { value: 'pick', label: 'Pick’em' }, { value: 'small', label: 'Small ≤3' }, { value: 'medium', label: 'Medium ≤6.5' }, { value: 'large', label: 'Large 7+' }], f.spread)}</select></label>
-        <label>Total <select name="total" title="Closing total buckets">${optList([{ value: 'all', label: 'All' }, { value: 'low', label: 'Low <42' }, { value: 'mid', label: 'Mid 42–47.5' }, { value: 'high', label: 'High ≥48' }], f.total)}</select></label>
+        ${filterField('Distance', 'distance', 'Local = 0–1 time zones; cross-country = 2+', [{ value: 'all', label: 'All' }, { value: 'local', label: 'Local' }, { value: 'cross', label: 'Cross-country' }], f, DEFAULT_BT)}
+        ${filterField('Roof', 'roof', 'Dome, outdoor, or retractable (open/closed)', [{ value: 'all', label: 'All' }, { value: 'dome', label: 'Dome' }, { value: 'outdoor', label: 'Outdoor' }, { value: 'retractable', label: 'Retractable' }], f, DEFAULT_BT)}
+        ${filterField('Role', 'role', 'Favorite or underdog from the spread', [{ value: 'all', label: 'All' }, { value: 'favorite', label: 'Favorite' }, { value: 'underdog', label: 'Underdog' }], f, DEFAULT_BT)}
+        ${filterField('Division', 'division', 'Same-division opponents', [{ value: 'all', label: 'All' }, { value: 'divisional', label: 'Divisional' }, { value: 'non-div', label: 'Non-div' }], f, DEFAULT_BT)}
+        ${filterField('Days off', 'daysOff', 'Short rest ≤5 days, bye+ ≥11, else normal', [{ value: 'all', label: 'All' }, { value: 'short', label: 'Short rest' }, { value: 'normal', label: 'Normal' }, { value: 'bye', label: 'Bye+' }], f, DEFAULT_BT)}
+        ${filterField('Spread size', 'spread', '|spread_line| buckets', [{ value: 'all', label: 'All' }, { value: 'pick', label: 'Pick’em' }, { value: 'small', label: 'Small ≤3' }, { value: 'medium', label: 'Medium ≤6.5' }, { value: 'large', label: 'Large 7+' }], f, DEFAULT_BT)}
+        ${filterField('Total', 'total', 'Closing total buckets', [{ value: 'all', label: 'All' }, { value: 'low', label: 'Low <42' }, { value: 'mid', label: 'Mid 42–47.5' }, { value: 'high', label: 'High ≥48' }], f, DEFAULT_BT)}
       </div>
-      ${chips.length ? `<div class="hist-chips">${chips.map((c) => `<button type="button" class="filter-chip" data-bt-chip-clear="${c.key}">${c.text} ×</button>`).join('')}</div>` : ''}
+      ${chips.length ? `<div class="hist-chips">${chips.map((c) => `<button type="button" class="filter-chip on" data-bt-chip-clear="${c.key}" title="Clear ${c.text}">${c.text} ×</button>`).join('')}</div>` : ''}
     </form>`;
   }
 
@@ -1312,8 +1325,8 @@
       <p class="bt-note">Ordered pre-game states. The next-game distribution is the slice that matches every step. Last-5 hot = 4–5 wins/covers; cold = 0–1. Filters above apply first.</p>
       ${steps.map((step, i) => `<div class="bt-step">
         ${i ? '<span class="bt-arrow">→</span>' : ''}
-        <select data-chain-dim="${i}">${chainDimOptions(step.dim)}</select>
-        <select data-chain-val="${i}">${chainValueOptions(step.dim, step.value)}</select>
+        <select class="${step.dim ? 'on' : ''}" data-chain-dim="${i}">${chainDimOptions(step.dim)}</select>
+        <select class="${step.dim && step.value && step.value !== 'all' ? 'on' : ''}" data-chain-val="${i}">${chainValueOptions(step.dim, step.value)}</select>
         <button type="button" class="btn-del" data-chain-del="${i}" title="Remove step">×</button>
       </div>`).join('')}
       <div class="hist-actions">
@@ -1449,18 +1462,17 @@
   function backtestGamesTable(rows) {
     const cols = [
       { key: 'gameDate', label: 'Date', title: 'Kickoff in America/New_York as YYYY-MM-DD HH:MM EST (literal EST suffix)' },
-      { key: 'opponent', label: 'Matchup', title: 'Opponent or AWAY @ HOME matchup' },
+      { key: 'opponent', label: 'Matchup', title: 'Away and home team abbreviations (AWAY @ HOME)' },
       { key: 'spreadLabel', label: 'Spread', title: 'Closing spread for the focus team (or home-favored line)' },
       { key: 'total_line', label: 'Total', title: 'Closing total' },
-      { key: 'restDays', label: 'Rest', title: 'Days of rest for the focus team' },
+      { key: 'restDays', label: 'Days rest', title: 'Days of rest for the focus team before this game' },
       { key: 'weatherLabel', label: 'Weather', title: 'Weather / roof conditions' },
       { key: 'coverLabel', label: 'Cover', title: 'Spread cover (C), fail (F), or push (P)' },
       { key: 'ou', label: 'OU', title: 'Over/under result (O, U, or P)' },
       { key: 'expected', label: 'Expected', title: 'AI expected call (ATS side and Over/Under)' },
       { key: 'confidence', label: 'Conf %', title: 'Rule-based confidence 51–92 from projection edges and sample size' },
       { key: 'expectedAtsHit', label: 'ATS hit', title: 'Whether the expected ATS call hit (W, L, or P)' },
-      { key: 'expectedOuHit', label: 'OU hit', title: 'Whether the expected over/under call hit (W, L, or P)' },
-      { key: 'expectedJoint', label: 'Joint', title: 'Joint ATS+OU grade — both must hit; a push on either side is a push' }
+      { key: 'expectedOuHit', label: 'OU hit', title: 'Whether the expected over/under call hit (W, L, or P)' }
     ];
     const sorted = sortedBacktestGames(rows);
     const { key, dir } = state.backtestSort;
@@ -1472,7 +1484,7 @@
       }).join('')}</tr></thead>
       <tbody>${sorted.map((r) => `<tr>
         <td>${esc(r.gameDate || '')}</td>
-        <td>${esc(r.opponent || `${r.away_team} @ ${r.home_team}`)}</td>
+        <td>${esc(r.matchup || `${r.away_team} @ ${r.home_team}`)}</td>
         <td>${esc(r.spreadLabel || '—')}</td>
         <td>${esc(r.total_line == null ? '—' : r.total_line)}</td>
         <td>${esc(r.restDays == null ? '—' : r.restDays)}</td>
@@ -1483,7 +1495,6 @@
         <td>${r.confidence != null ? `${esc(r.confidence)}%` : '—'}</td>
         <td>${hitCell(r.expectedAtsHit)}</td>
         <td>${hitCell(r.expectedOuHit)}</td>
-        <td>${hitCell(r.expectedJoint)}</td>
       </tr>`).join('')}</tbody>
     </table></div>`;
   }
@@ -1491,7 +1502,7 @@
   function downloadBacktestCsv() {
     const rows = (state.backtest && state.backtest.games) || [];
     if (!rows.length) return;
-    const headers = ['date','season','week','away','home','focus','spread','total','away_rest','home_rest','weather','roof','site','division','role','last_game','last5_wl','last5_ats','home_score','away_score','outright','cover','ou','expected','confidence','expected_ats_hit','expected_ou_hit','expected_joint'];
+    const headers = ['date','season','week','away','home','focus','spread','total','away_rest','home_rest','weather','roof','site','division','role','last_game','last5_wl','last5_ats','home_score','away_score','outright','cover','ou','expected','confidence','expected_ats_hit','expected_ou_hit'];
     const escCsv = (v) => {
       const s = v == null ? '' : String(v);
       return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
@@ -1504,7 +1515,7 @@
         weather: r.weatherLabel, roof: r.roofLabel, site: r.site, division: r.divisionalLabel, role: r.role,
         last_game: r.lastGame, last5_wl: r.last5wl, last5_ats: r.last5ats, home_score: r.home_score, away_score: r.away_score,
         outright: r.outright, cover: r.coverLabel, ou: r.ou, expected: r.expected, confidence: r.confidence,
-        expected_ats_hit: r.expectedAtsHit, expected_ou_hit: r.expectedOuHit, expected_joint: r.expectedJoint
+        expected_ats_hit: r.expectedAtsHit, expected_ou_hit: r.expectedOuHit
       };
       lines.push(headers.map((h) => escCsv(rec[h])).join(','));
     }

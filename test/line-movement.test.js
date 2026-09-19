@@ -16,7 +16,7 @@ const { loadSchemaSql } = require('../src/schema');
 
 test('build version is a positive integer', () => {
   assert.equal(typeof BUILD, 'number');
-  assert.ok(BUILD >= 4);
+  assert.ok(BUILD >= 5);
 });
 
 test('resolveOpening keeps the first stored open and takes first current when empty', () => {

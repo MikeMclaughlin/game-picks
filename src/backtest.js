@@ -402,8 +402,7 @@ const CSV_HEADERS = [
   'expected',
   'confidence',
   'expected_ats_hit',
-  'expected_ou_hit',
-  'expected_joint'
+  'expected_ou_hit'
 ];
 
 function toCsv(rows) {
@@ -436,8 +435,7 @@ function toCsv(rows) {
       expected: row.expected,
       confidence: row.confidence,
       expected_ats_hit: row.expectedAtsHit,
-      expected_ou_hit: row.expectedOuHit,
-      expected_joint: row.expectedJoint
+      expected_ou_hit: row.expectedOuHit
     };
     lines.push(CSV_HEADERS.map((h) => csvEscape(rec[h])).join(','));
   }
@@ -459,7 +457,8 @@ function enrichObservation(obs, index) {
     away_team: game.away_team,
     home_team: game.home_team,
     team,
-    opponent: log.opponent,
+    matchup: `${game.away_team} @ ${game.home_team}`,
+    opponent: `${game.away_team} @ ${game.home_team}`,
     site: log.site,
     spread: log.spread,
     spreadLabel: log.spreadLabel,
@@ -735,7 +734,9 @@ function backtestPayload(games, options = {}) {
       chain: 'Each chain step further restricts games whose pre-game state matches that dimension (last-5 hot = 4–5 W or covers).',
       last5: 'hot = 4–5 wins/covers in the last 5 decided games; cold = 0–1; mixed = 2–3. Patterns shorter than 3 decided games are excluded from those buckets.',
       spread: 'Spread size from |spread_line|: pick = 0, small ≤3, medium ≤6.5, large 7+.',
-      total: 'Total bucket: low <42, mid 42–47.5, high ≥48.'
+      total: 'Total bucket: low <42, mid 42–47.5, high ≥48.',
+      opponent: 'Away and home team abbreviations as AWAY @ HOME.',
+      restDays: 'Days of rest for the focus team before this game.'
     },
     dims: CHAIN_DIMS
   };

@@ -232,6 +232,15 @@ test('/api/history supports filter query params', async () => {
   assert.deepEqual(missingSortTitle, []);
   assert.match(script, /data-bt-csv/);
   assert.match(script, /ai-conf/);
+  assert.match(script, /% confidence/);
+  assert.match(script, /Days rest/);
+  assert.match(script, /key: 'favorite'/);
+  assert.match(script, /key: 'dog'/);
+  assert.match(script, /function filterField/);
+  assert.match(script, /filter-chip on/);
+  assert.doesNotMatch(script, /label: 'Joint'/);
+  assert.doesNotMatch(script, /expected_joint/);
+  assert.match(script, /r\.matchup \|\| `\$\{r\.away_team\} @ \$\{r\.home_team\}`/);
   assert.match(script, /N &lt; /);
   assert.match(script, /pickRow\(game, 'ats', game\.away_team, game\.home_team, atsPickLabel/);
   assert.match(script, /data-sel="\$\{esc\(left\)\}"/);
@@ -274,6 +283,9 @@ test('/api/history supports filter query params', async () => {
   assert.match(cssText, /\.bt-stats \{/);
   assert.match(cssText, /background: #FFB81C/);
   assert.match(cssText, /\.bt-stat \.v \{ color: #111;/);
+  assert.match(cssText, /\.hist-row label\.on select/);
+  assert.match(cssText, /\.filter-chip\.on/);
+  assert.match(cssText, /\.bt-step select\.on/);
 
   server.close();
 });
@@ -309,6 +321,10 @@ test('/api/backtest aggregates history with lift, expected calls, and CSV', asyn
     assert.equal(Object.prototype.hasOwnProperty.call(g, 'confidence'), true);
     if (g.expected) assert.match(String(g.expected), / and /);
     if (g.gameDate) assert.match(String(g.gameDate), /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} EST$/);
+    if (g.away_team && g.home_team) {
+      assert.equal(g.matchup, `${g.away_team} @ ${g.home_team}`);
+      assert.equal(g.opponent, `${g.away_team} @ ${g.home_team}`);
+    }
   }
   const chained = await fetch(`http://127.0.0.1:${port}/api/backtest?team=SEA&from=2023&to=2024&chain=site:home,role:underdog`);
   const chainBody = await chained.json();
@@ -322,6 +338,7 @@ test('/api/backtest aggregates history with lift, expected calls, and CSV', asyn
   const csv = await csvRes.text();
   assert.match(csv, /date,season,week/);
   assert.match(csv, /expected,confidence/);
+  assert.doesNotMatch(csv, /expected_joint/);
   server.close();
 });
 

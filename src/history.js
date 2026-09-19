@@ -37,6 +37,8 @@ const NOTES = {
   opponent: 'Team-relative opponent when a team is selected; otherwise the AWAY @ HOME matchup.',
   spread: 'Team-relative signed spread when a team is selected; otherwise home-favored line.',
   restDays: 'Team rest when a team is selected; otherwise away / home rest.',
+  favorite: 'Straight-up wins-losses when the team is a favorite (pick’em excluded).',
+  dog: 'Straight-up wins-losses when the team is an underdog (pick’em excluded).',
   distance: 'Timezone-based distance traveled by the road team (or the selected team).',
   cover: 'Spread cover (C), fail (F), or push (P). Team-relative when a team is selected.',
   divisional: 'Y if both clubs share the current static NFL division map.'
@@ -549,7 +551,9 @@ function historyPayload(games, filters) {
       spread: true,
       restDays: true,
       cover: true,
-      divisional: true
+      divisional: true,
+      favorite: true,
+      dog: true
     }
   };
 }
