@@ -94,7 +94,8 @@ test('/api/bootstrap returns JSON week payload', async () => {
     assert.ok(g.away_team);
     assert.ok(g.aiPick);
     assert.equal(typeof g.aiPick.confidence, 'number');
-    assert.ok(g.aiPick.confidence >= 51 && g.aiPick.confidence <= 92);
+    assert.ok(g.aiPick.confidence >= 1 && g.aiPick.confidence <= 99);
+    assert.ok(g.aiPick.rawConfidence >= 51 && g.aiPick.rawConfidence <= 92);
     assert.equal(Object.prototype.hasOwnProperty.call(g.aiPick, 'expected'), true);
     assert.equal(Object.prototype.hasOwnProperty.call(g, 'implied'), true);
     assert.equal(Object.prototype.hasOwnProperty.call(g, 'xPts'), true);
@@ -257,6 +258,10 @@ test('/api/history supports filter query params', async () => {
   assert.match(script, /data-bt-csv/);
   assert.match(script, /ai-conf/);
   assert.match(script, /% confidence/);
+  assert.match(script, /Calibrated historical ATS hit rate/);
+  assert.doesNotMatch(script, /not a model probability/);
+  assert.match(script, /Brier raw/);
+  assert.match(script, /Brier calibrated/);
   assert.match(script, /Days rest/);
   assert.match(script, /key: 'favorite'/);
   assert.match(script, /key: 'dog'/);
@@ -340,6 +345,9 @@ test('/api/backtest aggregates history with lift, expected calls, and CSV', asyn
   assert.ok(body.slice);
   assert.ok(body.vsLeague);
   assert.ok(body.expected);
+  assert.equal(Object.prototype.hasOwnProperty.call(body.expected, 'brierRaw'), true);
+  assert.equal(Object.prototype.hasOwnProperty.call(body.expected, 'brierCalibrated'), true);
+  assert.equal(body.expected.calibrationTarget, 'ats');
   assert.ok(Array.isArray(body.games));
   if (body.games.length) {
     const g = body.games[0];
