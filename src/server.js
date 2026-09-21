@@ -31,6 +31,7 @@ const { listTeamAbbrs } = require('./teams');
 const { persistAiPicks, listAiPicks } = require('./ai-picks');
 const { historyWindow } = require('./seasons');
 const { BUILD } = require('./build');
+const { attachLiveScores, resolveLiveScores } = require('./espn-live');
 
 const ROOT = path.join(__dirname, '..');
 const PUBLIC = path.join(ROOT, 'public');
@@ -383,6 +384,7 @@ async function handleApi(req, res, url) {
         console.error('persist ai picks failed', err);
       }
     }
+    const liveAttach = await attachLiveScores(cards, { sql });
     const poolId = user ? user.pool_id : sql ? (await getPool(sql)).id : null;
     const board = poolId ? await standings(sql, poolId, season, week) : [];
     return json(res, 200, {
@@ -395,7 +397,9 @@ async function handleApi(req, res, url) {
       clerk: publicClerkConfig(),
       season,
       week,
-      games: cards,
+      games: liveAttach.cards,
+      livePoll: Boolean(liveAttach.live && liveAttach.live.livePoll),
+      liveReason: liveAttach.live && liveAttach.live.reason,
       standings: board.slice(0, 8),
       teams: listTeamAbbrs(),
       rulesVersion: 1,
@@ -436,6 +440,7 @@ async function handleApi(req, res, url) {
         console.error('persist ai picks failed', err);
       }
     }
+    const liveAttach = await attachLiveScores(cards, { sql });
     const weeks = [...new Set(games.filter((g) => g.season === season && g.game_type !== 'PRE').map((g) => g.week))].sort(
       (a, b) => a - b
     );
@@ -445,7 +450,9 @@ async function handleApi(req, res, url) {
       season,
       week,
       weeks,
-      games: cards,
+      games: liveAttach.cards,
+      livePoll: Boolean(liveAttach.live && liveAttach.live.livePoll),
+      liveReason: liveAttach.live && liveAttach.live.reason,
       user: publicUser(user),
       clerk: publicClerkConfig()
     });
@@ -585,6 +592,30 @@ async function handleApi(req, res, url) {
       : [defaultSeasons().at(-1)];
     const result = await importGames(sql, { seasons, seedOnly: false, remoteTimeoutMs: 8000 });
     return json(res, 200, { ok: true, cron: true, ...result });
+  }
+
+  if ((pathname === '/api/live-scores' || pathname === '/api/cron/live-scores') && (method === 'GET' || method === 'POST')) {
+    if (pathname === '/api/cron/live-scores') requireAdmin(req, url);
+    const games = await allGames(sql);
+    const cursor = currentSeasonWeek(games);
+    const season = Number(url.searchParams.get('season') || cursor.season);
+    const week = Number(url.searchParams.get('week') || cursor.week);
+    const weekGames = games.filter((g) => Number(g.season) === season && Number(g.week) === week && g.game_type !== 'PRE');
+    const live = await resolveLiveScores(weekGames, { sql });
+    return json(res, 200, {
+      ok: true,
+      cron: pathname === '/api/cron/live-scores',
+      db,
+      season,
+      week,
+      queried: live.queried,
+      reason: live.reason,
+      livePoll: live.livePoll,
+      games: live.byGame,
+      fetchedAt: live.fetchedAt,
+      error: live.error || null,
+      build: BUILD
+    });
   }
 
   if (pathname === '/api/ai-picks' && method === 'GET') {
