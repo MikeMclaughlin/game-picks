@@ -2,7 +2,7 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { impliedPoints, projectGame, formatAtsPick, currentSeasonWeek, enrichGame, lastGameInfo, showRestDays, showRestWinPct, restAmountWinPct, lastFiveOutright, lastFiveAts, aiConfidence, expectedCallLabel, aiPick } = require('../src/week-view');
+const { impliedPoints, projectGame, formatAtsPick, currentSeasonWeek, enrichGame, lastGameInfo, showRestDays, showRestWinPct, restAmountWinPct, lastFiveOutright, lastFiveAts, aiConfidence, expectedCallLabel, aiPick, seasonRecord, formatRecord } = require('../src/week-view');
 const { roadTravel, teamCity } = require('../src/teams');
 const { UPSERT_SQL } = require('../src/nfl-data');
 
@@ -122,6 +122,9 @@ test('rest-amount win% shows when rest is not 7 or 8', () => {
 test('enrichGame exposes lastGame, city, short rest, and xPts from the line', () => {
   const prevDet = {
     game_id: '2026_01_TB_DET',
+    season: 2026,
+    week: 1,
+    game_type: 'REG',
     home_team: 'DET',
     away_team: 'TB',
     home_score: 27,
@@ -133,6 +136,9 @@ test('enrichGame exposes lastGame, city, short rest, and xPts from the line', ()
   };
   const prevBuf = {
     game_id: '2026_01_BUF_HOU',
+    season: 2026,
+    week: 1,
+    game_type: 'REG',
     home_team: 'HOU',
     away_team: 'BUF',
     home_score: 31,
@@ -164,7 +170,11 @@ test('enrichGame exposes lastGame, city, short rest, and xPts from the line', ()
   assert.equal(card.away.lastGame.result, 'Win');
   assert.equal(card.away.lastGame.margin, 7);
   assert.equal(card.away.lastGame.label, 'WIN +7');
+  assert.equal(card.away.record.label, '1-0');
+  assert.equal(card.away.ytdWinPct, 1);
   assert.equal(card.home.lastGame.result, 'Loss');
+  assert.equal(card.home.record.label, '0-1');
+  assert.equal(card.home.ytdWinPct, 0);
   assert.equal(card.home.lastGame.label, 'Loss -11');
   assert.equal(card.away.showRest, true);
   assert.equal(card.home.showRest, true);
@@ -235,6 +245,136 @@ test('last-5 streaks are oldest-to-newest and skip ties/pushes', () => {
   assert.equal(later.home.lastFiveAts, 'C-F-C-F-C');
   assert.equal(later.home.showRest, false);
   assert.equal(later.away.showRest, true);
+});
+
+test('seasonRecord is YTD from scored same-season games before kickoff', () => {
+  assert.equal(formatRecord(1, 1, 0), '1-1');
+  assert.equal(formatRecord(1, 1, 1), '1-1-1');
+  function g(id, season, kickoff, home, away, hs, as, type) {
+    return {
+      game_id: id,
+      season,
+      week: 1,
+      game_type: type || 'REG',
+      home_team: home,
+      away_team: away,
+      home_score: hs,
+      away_score: as,
+      kickoff
+    };
+  }
+  const history = [
+    g('w1', 2026, '2026-09-13T17:00:00Z', 'NYG', 'DAL', 28, 20),
+    g('w1b', 2026, '2026-09-13T17:00:00Z', 'LAR', 'SF', 7, 27),
+    g('old', 2025, '2025-12-28T18:00:00Z', 'DAL', 'NYG', 10, 31),
+    g('pre', 2026, '2026-08-20T00:00:00Z', 'NYG', 'NE', 24, 10, 'PRE'),
+    g('later', 2026, '2026-09-21T20:15:00-04:00', 'LAR', 'NYG', 14, 17)
+  ];
+  const nyg = seasonRecord(history, 'NYG', 2026, '2026-09-21T20:15:00-04:00');
+  assert.equal(nyg.label, '1-0');
+  assert.equal(nyg.wins, 1);
+  assert.equal(nyg.losses, 0);
+  assert.equal(nyg.winPct, 1);
+  const lar = seasonRecord(history, 'LAR', 2026, '2026-09-21T20:15:00-04:00');
+  assert.equal(lar.label, '0-1');
+  assert.equal(lar.winPct, 0);
+  const empty = seasonRecord(history, 'NYG', 2026, '2026-09-10T00:00:00Z');
+  assert.equal(empty.label, '0-0');
+  assert.equal(empty.winPct, null);
+  const tied = seasonRecord([
+    g('t', 2026, '2026-09-13T17:00:00Z', 'DET', 'CHI', 20, 20)
+  ], 'DET', 2026, '2026-09-20T17:00:00Z');
+  assert.equal(tied.label, '0-0-1');
+  assert.equal(tied.winPct, null);
+});
+
+test('enrichGame attaches YTD record and travel win% for 2+ tz road games', () => {
+  const nygWin = {
+    game_id: '2025_12_NYG_SEA',
+    season: 2025,
+    week: 12,
+    game_type: 'REG',
+    home_team: 'SEA',
+    away_team: 'NYG',
+    home_score: 10,
+    away_score: 17,
+    kickoff: '2025-11-23T21:05:00Z',
+    location: 'Home'
+  };
+  const nygLoss = {
+    game_id: '2025_08_NYG_SF',
+    season: 2025,
+    week: 8,
+    game_type: 'REG',
+    home_team: 'SF',
+    away_team: 'NYG',
+    home_score: 24,
+    away_score: 10,
+    kickoff: '2025-10-26T20:25:00Z',
+    location: 'Home'
+  };
+  const nygEast = {
+    game_id: '2025_04_NYG_BUF',
+    season: 2025,
+    week: 4,
+    game_type: 'REG',
+    home_team: 'BUF',
+    away_team: 'NYG',
+    home_score: 14,
+    away_score: 21,
+    kickoff: '2025-09-28T17:00:00Z',
+    location: 'Home'
+  };
+  const week1Nyg = {
+    game_id: '2026_01_DAL_NYG',
+    season: 2026,
+    week: 1,
+    game_type: 'REG',
+    home_team: 'NYG',
+    away_team: 'DAL',
+    home_score: 28,
+    away_score: 20,
+    kickoff: '2026-09-13T20:20:00-04:00',
+    location: 'Home'
+  };
+  const week1Lar = {
+    game_id: '2026_01_SF_LA',
+    season: 2026,
+    week: 1,
+    game_type: 'REG',
+    home_team: 'LAR',
+    away_team: 'SF',
+    home_score: 7,
+    away_score: 27,
+    kickoff: '2026-09-10T20:35:00-04:00',
+    location: 'Neutral'
+  };
+  const game = {
+    game_id: '2026_02_NYG_LA',
+    season: 2026,
+    week: 2,
+    game_type: 'REG',
+    kickoff: '2026-09-21T20:15:00-04:00',
+    weekday: 'Monday',
+    home_team: 'LAR',
+    away_team: 'NYG',
+    spread_line: 7,
+    total_line: 47.5,
+    home_rest: 11,
+    away_rest: 8,
+    home_score: null,
+    away_score: null
+  };
+  const card = enrichGame(game, [nygWin, nygLoss, nygEast, week1Nyg, week1Lar]);
+  assert.equal(card.away.record.label, '1-0');
+  assert.equal(card.away.ytdWinPct, 1);
+  assert.equal(card.home.record.label, '0-1');
+  assert.equal(card.home.ytdWinPct, 0);
+  assert.equal(card.away.travel.dir, 'west');
+  assert.equal(card.away.travel.zones, 3);
+  assert.equal(card.away.travel.label, 'west +3tz');
+  assert.equal(card.away.travel.winPct, 0.5);
+  assert.equal(card.home.travel, undefined);
 });
 
 test('expected call label and confidence stay in documented bounds', () => {

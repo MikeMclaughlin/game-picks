@@ -216,6 +216,45 @@ function teamGames(history, team) {
   return history.filter((g) => (g.home_team === t || g.away_team === t) && scoresReady(g));
 }
 
+function isPreseason(game) {
+  return String(game && game.game_type ? game.game_type : 'REG').toUpperCase() === 'PRE';
+}
+
+function formatRecord(wins, losses, ties) {
+  if (ties > 0) return `${wins}-${losses}-${ties}`;
+  return `${wins}-${losses}`;
+}
+
+/** YTD W-L from scored regular-season games this season before kickoff. Ties omitted from win %. */
+function seasonRecord(history, team, season, beforeKickoff) {
+  const t = teamAbbr(team);
+  const cap = Number(season);
+  const games = priorScoredGames(history, team, beforeKickoff).filter((g) => {
+    if (isPreseason(g)) return false;
+    const s = Number(g.season);
+    if (!Number.isFinite(s) || !Number.isFinite(cap)) return false;
+    return s === cap;
+  });
+  let wins = 0;
+  let losses = 0;
+  let ties = 0;
+  for (const g of games) {
+    const letter = resultLetter(t, g);
+    if (letter === 'W') wins += 1;
+    else if (letter === 'L') losses += 1;
+    else if (letter === 'T') ties += 1;
+  }
+  const decided = wins + losses;
+  return {
+    wins,
+    losses,
+    ties,
+    games: games.length,
+    label: formatRecord(wins, losses, ties),
+    winPct: decided ? wins / decided : null
+  };
+}
+
 function winPct(games, team, predicate) {
   const t = teamAbbr(team);
   let wins = 0;
@@ -370,6 +409,7 @@ function sideContext(game, side, history) {
     return d != null && d <= SHORT_REST_DAYS;
   });
   const restPct = restAmountWinPct(games, team, rest);
+  const ytd = seasonRecord(history, team, game.season, game.kickoff);
   const ctx = {
     team,
     city: teamCity(team),
@@ -382,6 +422,8 @@ function sideContext(game, side, history) {
     lastGame: lastGameInfo(team, prev),
     lastFive: lastFiveOutright(history, team, game.kickoff),
     lastFiveAts: lastFiveAts(history, team, game.kickoff),
+    record: ytd,
+    ytdWinPct: ytd.winPct,
     homeWinPct: homePct,
     awayWinPct: awayPct,
     shortRestWinPct: short ? shortPct : null,
@@ -391,7 +433,7 @@ function sideContext(game, side, history) {
     const travel = roadTravel(game.away_team, game.home_team);
     if (travel) {
       const travelPct = winPct(games, team, (g, t) => {
-        if (g.away_team !== t) return false;
+        if (teamAbbr(g.away_team) !== t) return false;
         const tr = roadTravel(g.away_team, g.home_team);
         return tr && tr.dir === travel.dir && tr.zones === travel.zones;
       });
@@ -489,5 +531,7 @@ module.exports = {
   lastFiveOutright,
   lastFiveAts,
   lastFiveLetters,
-  priorScoredGames
+  priorScoredGames,
+  seasonRecord,
+  formatRecord
 };

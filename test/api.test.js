@@ -101,6 +101,8 @@ test('/api/bootstrap returns JSON week payload', async () => {
     assert.ok(g.home && g.home.city);
     assert.ok(g.away && g.away.city);
     assert.equal(Object.prototype.hasOwnProperty.call(g.home, 'lastGame'), true);
+    assert.equal(Object.prototype.hasOwnProperty.call(g.home, 'record'), true);
+    assert.equal(Object.prototype.hasOwnProperty.call(g.away, 'ytdWinPct'), true);
     assert.equal(Object.prototype.hasOwnProperty.call(g.home, 'lastFive'), true);
     assert.equal(Object.prototype.hasOwnProperty.call(g.home, 'lastFiveAts'), true);
     assert.equal(Object.prototype.hasOwnProperty.call(g.home, 'showRest'), true);
@@ -121,6 +123,15 @@ test('/api/bootstrap returns JSON week payload', async () => {
       assert.equal(g.totalMove.moved, false);
       assert.equal(g.totalMove.deltaLabel, 'flat');
     }
+  }
+  const mnf = (body.games || []).find((g) => g.away_team === 'NYG' && (g.home_team === 'LAR' || g.home_team === 'LA'));
+  if (mnf) {
+    assert.ok(mnf.away.record && mnf.away.record.label);
+    assert.equal(Object.prototype.hasOwnProperty.call(mnf.away, 'ytdWinPct'), true);
+    assert.ok(mnf.away.travel);
+    assert.equal(mnf.away.travel.dir, 'west');
+    assert.ok(mnf.away.travel.zones >= 2);
+    assert.equal(Object.prototype.hasOwnProperty.call(mnf.away.travel, 'winPct'), true);
   }
   server.close();
 });
@@ -222,6 +233,12 @@ test('/api/history supports filter query params', async () => {
   assert.match(script, /abbrev-key/);
   assert.match(script, /card-foot/);
   assert.match(script, /Win % Rest/);
+  assert.match(script, /statRow\(\s*'Record'/);
+  assert.match(script, /statRow\(\s*'Win %',/);
+  assert.match(script, /Win % Home\/Away/);
+  assert.match(script, /Win % Travel/);
+  assert.match(script, /function travelWinPctCell/);
+  assert.match(script, /ytdWinPct/);
   assert.match(script, /data-hist-game-sort/);
   assert.match(script, /function backtestView/);
   assert.match(script, /game-picks:backtest:v1/);

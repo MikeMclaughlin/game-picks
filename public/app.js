@@ -816,6 +816,14 @@
     return side.restWinPct != null;
   }
 
+  function travelWinPctCell(side) {
+    const tr = side && side.travel;
+    if (!tr || tr.winPct == null) return { html: '', cls: 'muted' };
+    const zones = Number(tr.zones);
+    if (!Number.isFinite(zones) || zones < 2) return { html: '', cls: 'muted' };
+    return statCell(fmtPct(tr.winPct), 'muted');
+  }
+
   function cardStatRows(game) {
     const away = game.away || {};
     const home = game.home || {};
@@ -825,6 +833,16 @@
     const restH = restCell(home);
     const rows = [];
     rows.push(statRow('Last Game', statCell(lastA), statCell(lastH)));
+    rows.push(statRow(
+      'Record',
+      statCell(away.record && away.record.label ? away.record.label : ''),
+      statCell(home.record && home.record.label ? home.record.label : '')
+    ));
+    rows.push(statRow(
+      'Win %',
+      statCell(away.ytdWinPct != null ? fmtPct(away.ytdWinPct) : ''),
+      statCell(home.ytdWinPct != null ? fmtPct(home.ytdWinPct) : '')
+    ));
     rows.push(statRow('Rest Days', restA, restH));
     if ((away.short && away.shortRestWinPct != null) || (home.short && home.shortRestWinPct != null)) {
       rows.push(statRow(
@@ -841,10 +859,15 @@
       ));
     }
     rows.push(statRow(
-      'Win %',
+      'Win % Home/Away',
       statCell(away.awayWinPct != null ? `away ${fmtPct(away.awayWinPct)}` : '', 'muted'),
       statCell(home.homeWinPct != null ? `home ${fmtPct(home.homeWinPct)}` : '', 'muted')
     ));
+    const travelA = travelWinPctCell(away);
+    const travelH = travelWinPctCell(home);
+    if (travelA.html || travelH.html) {
+      rows.push(statRow('Win % Travel', travelA, travelH));
+    }
     rows.push(statRow(
       'Spread Pts',
       statCell(signedSpreadPts(game, game.away_team)),
