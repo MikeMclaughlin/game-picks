@@ -2,7 +2,14 @@
 
 const { roadTravel, distanceBucket, sameDivision } = require('./teams');
 const { toNumber, scoresReady, atsLetter } = require('./grader');
-const { resultLetter, projectGame, aiPick } = require('./week-view');
+const { resultLetter, projectGame, projectGameFromRates, aiPick } = require('./week-view');
+const {
+  fitCalibrationFromGames,
+  sliceBrierStats,
+  bumpScoringRates,
+  CALIBRATION_NOTE,
+  CALIBRATION_TARGET
+} = require('./calibration');
 const { formatKickoffEst } = require('./kickoff-slot');
 const {
   parseHistoryFilters,
@@ -486,6 +493,7 @@ function enrichObservation(obs, index) {
     expectedAts: pick && pick.ats ? pick.ats : null,
     expectedOu: pick && pick.ou ? pick.ou : null,
     confidence: pick && pick.confidence != null ? pick.confidence : null,
+    rawConfidence: pick && pick.rawConfidence != null ? pick.rawConfidence : null,
     expectedAtsHit: expectedGrade ? expectedGrade.atsHit : null,
     expectedOuHit: expectedGrade ? expectedGrade.ouHit : null,
     expectedJoint: expectedGrade ? expectedGrade.joint : null
@@ -535,49 +543,6 @@ function teamYearFilters(filters) {
   };
 }
 
-function bumpRates(rates, game) {
-  const hs = toNumber(game.home_score);
-  const as = toNumber(game.away_score);
-  if (hs == null || as == null) return;
-  for (const [team, scored, allowed] of [
-    [game.home_team, hs, as],
-    [game.away_team, as, hs]
-  ]) {
-    const cur = rates.get(team) || { for: 0, against: 0, n: 0 };
-    cur.for += scored;
-    cur.against += allowed;
-    cur.n += 1;
-    rates.set(team, cur);
-  }
-}
-
-function projectionFromRates(game, home, away) {
-  if (!home || !away || !home.n || !away.n) {
-    return projectGame(game, []);
-  }
-  const projHome = (home.for / home.n + away.against / away.n) / 2;
-  const projAway = (away.for / away.n + home.against / home.n) / 2;
-  const projTotal = projHome + projAway;
-  const projMargin = projHome - projAway;
-  const total = toNumber(game.total_line);
-  const spread = toNumber(game.spread_line);
-  let ou = null;
-  if (total != null) ou = projTotal > total ? 'over' : 'under';
-  let atsTeam = null;
-  if (spread != null) atsTeam = projMargin > spread ? game.home_team : game.away_team;
-  return {
-    hasHistory: true,
-    projHome,
-    projAway,
-    projTotal,
-    projMargin,
-    sampleN: Math.min(home.n, away.n),
-    fadeHighTotal: false,
-    ou,
-    atsTeam
-  };
-}
-
 function expectedPicksByGame(games) {
   const sorted = [...games]
     .filter((g) => scoresReady(g) && g.game_type !== 'PRE')
@@ -585,9 +550,9 @@ function expectedPicksByGame(games) {
   const rates = new Map();
   const out = new Map();
   for (const game of sorted) {
-    const projection = projectionFromRates(game, rates.get(game.home_team), rates.get(game.away_team));
+    const projection = projectGameFromRates(game, rates.get(game.home_team), rates.get(game.away_team));
     out.set(game.game_id, aiPick(game, projection));
-    bumpRates(rates, game);
+    bumpScoringRates(rates, game);
   }
   return out;
 }
@@ -615,11 +580,16 @@ function expectedSummary(obs) {
       confN += 1;
     }
   }
+  const brier = sliceBrierStats(obs);
   return {
     ats,
     ou,
     joint,
-    confidenceAvg: confN ? Math.round(confSum / confN) : null
+    confidenceAvg: confN ? Math.round(confSum / confN) : null,
+    calibrationTarget: CALIBRATION_TARGET,
+    brierRaw: brier.brierRaw,
+    brierCalibrated: brier.brierCalibrated,
+    brierN: brier.n
   };
 }
 
@@ -694,6 +664,7 @@ function backtestPayload(games, options = {}) {
   };
   const chain = parseChain(options.chain || []);
   const scored = (games || []).filter((g) => g.game_type !== 'PRE');
+  fitCalibrationFromGames(scored);
   const index = indexByTeam(scored);
   const leagueObs = collectObservations(scored, yearOnlyFilters(filters), [], index);
   const peerObs = collectObservations(scored, teamYearFilters(filters), [], index);
@@ -728,7 +699,7 @@ function backtestPayload(games, options = {}) {
     notes: {
       ...NOTES,
       smallN: `Rates with N < ${SMALL_N} are greyed — treat them as noisy.`,
-      confidence: 'Confidence 51–92 from ATS/OU projection edges and prior sample size (see AI Pick tooltip).',
+      confidence: CALIBRATION_NOTE,
       expected: 'Expected call uses the same scoring-rate projection as Current Week AI Pick (ATS side + Over/Under).',
       baseline: 'League baseline is all scored games in the selected year range (home perspective when no team is selected). Team baseline is that club’s unfiltered games in the same years.',
       chain: 'Each chain step further restricts games whose pre-game state matches that dimension (last-5 hot = 4–5 W or covers).',

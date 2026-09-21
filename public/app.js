@@ -1044,7 +1044,7 @@
     const aiRaw = pick.expected
       || (pick.label ? pick.label.replace(/^AI Pick:\s*/i, '').trim() : '');
     const conf = pick.confidence != null && Number.isFinite(Number(pick.confidence))
-      ? `<span class="ai-conf" title="Rule-based confidence 51–92 from ATS/OU projection edges and prior sample size — not a model probability."> · ${esc(String(Math.round(Number(pick.confidence))))}% confidence</span>`
+      ? `<span class="ai-conf" title="Calibrated historical ATS hit rate (2016+ scored REG). The raw edge/sample rule is mapped with isotonic reliability so this % tracks ATS hit rate by confidence bucket — not a joint ATS+OU probability."> · ${esc(String(Math.round(Number(pick.confidence))))}% confidence</span>`
       : '';
     const awayCity = (game.away && game.away.city) || game.away_team;
     const homeCity = (game.home && game.home.city) || game.home_team;
@@ -1510,14 +1510,18 @@
     const ats = recPct(exp.ats);
     const ou = recPct(exp.ou);
     const joint = recPct(exp.joint);
+    const brierRaw = exp.brierRaw != null ? Number(exp.brierRaw).toFixed(4) : '—';
+    const brierCal = exp.brierCalibrated != null ? Number(exp.brierCalibrated).toFixed(4) : '—';
     return `<div class="hist-block">
       <h2>Expected call accuracy</h2>
-      <p class="bt-note">Same AI Pick logic as Current Week, written as <b>BUF -5.5 and Over</b>. Confidence is the transparent edge/sample rule (51–92). ATS and OU are graded separately; joint requires both correct (a push on either side is a push).</p>
+      <p class="bt-note">Same AI Pick sides as Current Week, written as <b>BUF -5.5 and Over</b>. Confidence is a calibrated historical ATS hit rate (2016+ scored REG), not the raw 51–92 rule and not a joint ATS+OU probability. ATS and OU are graded separately; joint requires both correct (a push on either side is a push).</p>
       <div class="bt-stats">
         <div class="bt-stat"><div class="k">Avg confidence</div><div class="v">${exp.confidenceAvg != null ? `${esc(exp.confidenceAvg)}%` : '—'}</div></div>
         <div class="bt-stat"><div class="k">ATS hit</div><div class="v">${esc(ats.pct)}</div><div class="s">${esc(ats.label)}</div></div>
         <div class="bt-stat"><div class="k">OU hit</div><div class="v">${esc(ou.pct)}</div><div class="s">${esc(ou.label)}</div></div>
         <div class="bt-stat"><div class="k">Joint ATS+OU</div><div class="v">${esc(joint.pct)}</div><div class="s">${esc(joint.label)}</div></div>
+        <div class="bt-stat"><div class="k">Brier raw</div><div class="v">${esc(brierRaw)}</div><div class="s">ATS, lower better</div></div>
+        <div class="bt-stat"><div class="k">Brier calibrated</div><div class="v">${esc(brierCal)}</div><div class="s">ATS, lower better</div></div>
       </div>
     </div>`;
   }
@@ -1566,7 +1570,7 @@
       { key: 'coverLabel', label: 'Cover', title: 'Spread cover (C), fail (F), or push (P)' },
       { key: 'ou', label: 'OU', title: 'Over/under result (O, U, or P)' },
       { key: 'expected', label: 'Expected', title: 'AI expected call (ATS side and Over/Under)' },
-      { key: 'confidence', label: 'Conf %', title: 'Rule-based confidence 51–92 from projection edges and sample size' },
+      { key: 'confidence', label: 'Conf %', title: 'Calibrated historical ATS hit rate (isotonic map from the raw edge/sample rule)' },
       { key: 'expectedAtsHit', label: 'ATS hit', title: 'Whether the expected ATS call hit (W, L, or P)' },
       { key: 'expectedOuHit', label: 'OU hit', title: 'Whether the expected over/under call hit (W, L, or P)' }
     ];

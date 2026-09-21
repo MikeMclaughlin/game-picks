@@ -25,6 +25,7 @@ const {
 const { validatePick, gradeAll, isLocked, exclusivePartner, assertExclusivePicks } = require('./grader');
 const { importGames, loadSeedGames, loadSchedule2026, defaultSeasons } = require('./nfl-data');
 const { enrichGame, currentSeasonWeek } = require('./week-view');
+const { fitCalibrationFromGames } = require('./calibration');
 const { parseHistoryFilters, historyPayload } = require('./history');
 const { parseBacktestFilters, parseChain, backtestPayload, backtestCsv } = require('./backtest');
 const { listTeamAbbrs } = require('./teams');
@@ -376,6 +377,7 @@ async function handleApi(req, res, url) {
     const wagers = user ? await userWagers(sql, user.id, weekGames.map((g) => g.game_id)) : [];
     const byGame = groupWagers(wagers);
     const history = historyWindow(games, season);
+    fitCalibrationFromGames(games);
     const cards = weekGames.map((g) => enrichGame(g, history, byGame));
     if (sql) {
       try {
@@ -432,6 +434,7 @@ async function handleApi(req, res, url) {
     const user = await currentUser(sql, req);
     const wagers = user ? await userWagers(sql, user.id, weekGames.map((g) => g.game_id)) : [];
     const history = historyWindow(games, season);
+    fitCalibrationFromGames(games);
     const cards = weekGames.map((g) => enrichGame(g, history, groupWagers(wagers)));
     if (sql) {
       try {

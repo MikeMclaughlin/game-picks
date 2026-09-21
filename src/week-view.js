@@ -3,6 +3,7 @@
 const { roadTravel, teamAbbr, teamCity } = require('./teams');
 const { toNumber, scoresReady, isLocked, atsLetter } = require('./grader');
 const { kickoffSlot } = require('./kickoff-slot');
+const { displayConfidence, getActiveMap } = require('./calibration');
 
 const SHORT_REST_DAYS = 5;
 
@@ -302,7 +303,9 @@ function expectedCallLabel(ats, ou) {
 }
 
 /**
- * Confidence 51–92 from projection edges and sample size (not a model probability).
+ * Raw rule score 51–92 from projection edges and sample size.
+ * This is the uncalibrated score fed into the isotonic ATS reliability map;
+ * displayed `confidence` is the calibrated ATS hit rate (see calibration.js).
  * Base 52. ATS: +3.5 per |projMargin − spread| (cap +21). OU: +2 per |projTotal − total|
  * (cap +14). Sample n = min(home games, away games): <8 −10, <16 −5, <30 −2, ≥60 +4.
  * No-history heuristic (fade totals ≥46): 54; otherwise 52.
@@ -368,7 +371,34 @@ function projectGame(game, history) {
   };
 }
 
-function aiPick(game, projection) {
+function projectGameFromRates(game, home, away) {
+  if (!home || !away || !home.n || !away.n) {
+    return projectGame(game, []);
+  }
+  const projHome = (home.for / home.n + away.against / away.n) / 2;
+  const projAway = (away.for / away.n + home.against / home.n) / 2;
+  const projTotal = projHome + projAway;
+  const projMargin = projHome - projAway;
+  const total = toNumber(game.total_line);
+  const spread = toNumber(game.spread_line);
+  let ou = null;
+  if (total != null) ou = projTotal > total ? 'over' : 'under';
+  let atsTeam = null;
+  if (spread != null) atsTeam = projMargin > spread ? game.home_team : game.away_team;
+  return {
+    hasHistory: true,
+    projHome,
+    projAway,
+    projTotal,
+    projMargin,
+    sampleN: Math.min(home.n, away.n),
+    fadeHighTotal: false,
+    ou,
+    atsTeam
+  };
+}
+
+function aiPick(game, projection, options = {}) {
   const total = formatLine(game.total_line);
   let ats = null;
   if (projection.atsTeam) {
@@ -383,7 +413,11 @@ function aiPick(game, projection) {
     ouText = `take the ${projection.ou} ${total}`;
   }
   const expected = expectedCallLabel(ats, projection.ou);
-  const confidence = aiConfidence(game, projection);
+  const rawConfidence = aiConfidence(game, projection);
+  const map = options.map === undefined
+    ? (options.calibrate === false ? null : getActiveMap())
+    : options.map;
+  const confidence = displayConfidence(rawConfidence, map);
   return {
     ats,
     ou: projection.ou,
@@ -391,6 +425,7 @@ function aiPick(game, projection) {
     label: [ats, ouText].filter(Boolean).join(' · ') || null,
     expected,
     confidence,
+    rawConfidence,
     atsTeam: projection.atsTeam || null
   };
 }
@@ -516,6 +551,7 @@ module.exports = {
   resultLetter,
   scoringRates,
   projectGame,
+  projectGameFromRates,
   aiPick,
   aiConfidence,
   expectedCallLabel,

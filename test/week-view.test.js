@@ -3,6 +3,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { impliedPoints, projectGame, formatAtsPick, currentSeasonWeek, enrichGame, lastGameInfo, showRestDays, showRestWinPct, restAmountWinPct, lastFiveOutright, lastFiveAts, aiConfidence, expectedCallLabel, aiPick, seasonRecord, formatRecord } = require('../src/week-view');
+const { resetCalibration } = require('../src/calibration');
 const { roadTravel, teamCity } = require('../src/teams');
 const { UPSERT_SQL } = require('../src/nfl-data');
 
@@ -120,6 +121,7 @@ test('rest-amount win% shows when rest is not 7 or 8', () => {
 });
 
 test('enrichGame exposes lastGame, city, short rest, and xPts from the line', () => {
+  resetCalibration();
   const prevDet = {
     game_id: '2026_01_TB_DET',
     season: 2026,
@@ -191,7 +193,9 @@ test('enrichGame exposes lastGame, city, short rest, and xPts from the line', ()
   assert.equal(card.kickoffSlot, 'slot-thu');
   assert.equal(Object.prototype.hasOwnProperty.call(card.aiPick, 'confidence'), true);
   assert.equal(typeof card.aiPick.confidence, 'number');
-  assert.ok(card.aiPick.confidence >= 51 && card.aiPick.confidence <= 92);
+  assert.ok(card.aiPick.confidence >= 1 && card.aiPick.confidence <= 99);
+  assert.equal(typeof card.aiPick.rawConfidence, 'number');
+  assert.ok(card.aiPick.rawConfidence >= 51 && card.aiPick.rawConfidence <= 92);
   assert.ok(card.aiPick.expected);
   assert.match(card.aiPick.expected, / and /);
   assert.equal(card.spread_open, 5.5);
@@ -378,6 +382,7 @@ test('enrichGame attaches YTD record and travel win% for 2+ tz road games', () =
 });
 
 test('expected call label and confidence stay in documented bounds', () => {
+  resetCalibration();
   assert.equal(expectedCallLabel('BUF -5.5', 'over'), 'BUF -5.5 and Over');
   assert.equal(expectedCallLabel('SEA +3', 'under'), 'SEA +3 and Under');
   assert.equal(aiConfidence({ total_line: 46 }, { hasHistory: false, fadeHighTotal: true }), 54);
@@ -397,4 +402,6 @@ test('expected call label and confidence stay in documented bounds', () => {
   });
   assert.equal(pick.expected, 'BUF -5.5 and Over');
   assert.equal(typeof pick.confidence, 'number');
+  assert.ok(pick.rawConfidence >= 51 && pick.rawConfidence <= 92);
+  assert.ok(pick.confidence >= 1 && pick.confidence <= 99);
 });

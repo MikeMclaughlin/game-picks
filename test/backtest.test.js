@@ -117,7 +117,12 @@ test('backtestPayload reports N, small-N flag, lift, expected calls, and CSV', (
   assert.match(row.expected, / and /);
   assert.equal(row.gameDate, '2024-09-22 13:00 EST');
   assert.equal(typeof row.confidence, 'number');
-  assert.ok(row.confidence >= 51 && row.confidence <= 92);
+  assert.ok(row.confidence >= 1 && row.confidence <= 99);
+  assert.ok(row.rawConfidence >= 51 && row.rawConfidence <= 92);
+  assert.equal(payload.expected.calibrationTarget, 'ats');
+  assert.ok(payload.expected.brierRaw == null || typeof payload.expected.brierRaw === 'number');
+  assert.ok(payload.expected.brierCalibrated == null || typeof payload.expected.brierCalibrated === 'number');
+  assert.match(payload.notes.confidence, /calibrated historical ATS hit rate/i);
   assert.ok(['W', 'L', 'P', null].includes(row.expectedAtsHit) || row.expectedAtsHit == null);
   const csv = backtestCsv(payload);
   assert.match(csv, /date,season,week,away,home/);
