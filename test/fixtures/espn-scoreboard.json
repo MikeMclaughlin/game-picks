@@ -1,0 +1,102 @@
+{
+  "season": { "type": 2, "year": 2026 },
+  "week": { "number": 2 },
+  "events": [
+    {
+      "id": "401872945",
+      "date": "2026-09-21T00:20Z",
+      "name": "Indianapolis Colts at Kansas City Chiefs",
+      "shortName": "IND @ KC",
+      "competitions": [
+        {
+          "competitors": [
+            { "homeAway": "home", "score": "3", "team": { "abbreviation": "KC" } },
+            { "homeAway": "away", "score": "7", "team": { "abbreviation": "IND" } }
+          ],
+          "status": {
+            "displayClock": "6:03",
+            "period": 1,
+            "type": {
+              "state": "in",
+              "completed": false,
+              "detail": "6:03 - 1st Quarter",
+              "shortDetail": "6:03 - 1st"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "401872944",
+      "date": "2026-09-20T20:25Z",
+      "name": "Washington Commanders at Dallas Cowboys",
+      "shortName": "WSH @ DAL",
+      "competitions": [
+        {
+          "competitors": [
+            { "homeAway": "home", "score": "37", "team": { "abbreviation": "DAL" } },
+            { "homeAway": "away", "score": "20", "team": { "abbreviation": "WSH" } }
+          ],
+          "status": {
+            "displayClock": "0:00",
+            "period": 4,
+            "type": {
+              "state": "post",
+              "completed": true,
+              "detail": "Final",
+              "shortDetail": "Final"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "401872946",
+      "date": "2026-09-20T17:00Z",
+      "name": "Green Bay Packers at New York Jets",
+      "shortName": "GB @ NYJ",
+      "competitions": [
+        {
+          "competitors": [
+            { "homeAway": "home", "score": "17", "team": { "abbreviation": "NYJ" } },
+            { "homeAway": "away", "score": "20", "team": { "abbreviation": "GB" } }
+          ],
+          "status": {
+            "displayClock": "0:00",
+            "period": 5,
+            "type": {
+              "state": "post",
+              "completed": true,
+              "detail": "Final/OT",
+              "shortDetail": "Final/OT"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "401872947",
+      "date": "2026-09-22T00:15Z",
+      "name": "New York Giants at Los Angeles Rams",
+      "shortName": "NYG @ LAR",
+      "competitions": [
+        {
+          "competitors": [
+            { "homeAway": "home", "score": "0", "team": { "abbreviation": "LAR" } },
+            { "homeAway": "away", "score": "0", "team": { "abbreviation": "NYG" } }
+          ],
+          "status": {
+            "displayClock": "0:00",
+            "period": 0,
+            "type": {
+              "state": "pre",
+              "completed": false,
+              "detail": "Mon, September 21st at 8:15 PM EDT",
+              "shortDetail": "9/21 - 8:15 PM EDT"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

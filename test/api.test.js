@@ -1,5 +1,7 @@
 'use strict';
 
+process.env.ESPN_LIVE = process.env.ESPN_LIVE || '0';
+
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const http = require('http');
@@ -84,7 +86,8 @@ test('/api/bootstrap returns JSON week payload', async () => {
   assert.ok(Array.isArray(body.games));
   assert.ok(body.season >= 2023);
   assert.ok(body.week >= 1);
-  assert.equal(body.clerk.configured, false);
+    assert.equal(body.clerk.configured, false);
+    assert.equal(Object.prototype.hasOwnProperty.call(body, 'livePoll'), true);
   if (body.games.length) {
     const g = body.games[0];
     assert.ok(g.home_team);
@@ -108,6 +111,7 @@ test('/api/bootstrap returns JSON week payload', async () => {
     assert.equal(Object.prototype.hasOwnProperty.call(g, 'totalMove'), true);
     assert.equal(Object.prototype.hasOwnProperty.call(g, 'spread_open'), true);
     assert.equal(Object.prototype.hasOwnProperty.call(g, 'total_open'), true);
+    assert.equal(Object.prototype.hasOwnProperty.call(g, 'live'), true);
     if (g.spread_line != null) {
       assert.equal(g.spreadMove.moved, false);
       assert.equal(g.spreadMove.deltaLabel, 'flat');
@@ -202,6 +206,9 @@ test('/api/history supports filter query params', async () => {
   assert.match(script, /function outrightPickLabel/);
   assert.match(script, /function ouPickLabel/);
   assert.match(script, /function lineMoveHtml/);
+  assert.match(script, /function scoreRow/);
+  assert.match(script, /function syncLivePoll/);
+  assert.match(script, /\/api\/live-scores/);
   assert.match(script, /function stackedPick/);
   assert.match(script, /function exclusivePartner/);
   assert.match(script, /Last 5 games/);
@@ -268,6 +275,8 @@ test('/api/history supports filter query params', async () => {
   assert.doesNotMatch(cssText, /font-size: 72px/);
   assert.match(cssText, /\.week-cards \.pick button \{ font-size: 16px; padding: 8px 10px; \}/);
   assert.match(cssText, /\.pick-stack \.pick-abbr, \.pick-stack \.pick-line \{ font-size: inherit; \}/);
+  assert.match(cssText, /\.score-row \{/);
+  assert.match(cssText, /background: #d8d8d8/);
   assert.match(cssText, /\.line-move \{/);
   assert.match(cssText, /font-size: 12px; line-height: 1\.25;/);
   assert.match(cssText, /\.line-delta\.up \{ color: var\(--green\)/);
@@ -355,5 +364,13 @@ test('/api/ai-picks and /api/cron/scores return JSON without a database', async 
   assert.equal(cron.status, 503);
   assert.equal(cronBody.ok, false);
   assert.equal(cronBody.db, 'missing');
+  const live = await fetch(`http://127.0.0.1:${port}/api/live-scores`);
+  const liveBody = await live.json();
+  assert.equal(live.status, 200);
+  assert.equal(liveBody.ok, true);
+  assert.equal(liveBody.queried, false);
+  assert.equal(liveBody.reason, 'disabled');
+  assert.equal(liveBody.livePoll, false);
+  assert.equal(liveBody.build, BUILD);
   server.close();
 });

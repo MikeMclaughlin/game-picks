@@ -143,6 +143,8 @@
   ];
   const SECONDARY_BT = new Set(['distance', 'roof', 'role', 'division', 'daysOff', 'spread', 'total']);
   let loadGen = 0;
+  const LIVE_POLL_MS = 5 * 60 * 1000;
+  let liveTimer = null;
 
   function readStore(key, fallback) {
     try {
@@ -269,6 +271,7 @@
     highlightTabs();
     if (changed) {
       render();
+      syncLivePoll();
       load().catch(showPageError);
     }
   }
@@ -735,6 +738,7 @@
     }
     if (gen !== loadGen) return;
     render();
+    syncLivePoll();
   }
 
   function passFilters(g) {
@@ -944,6 +948,74 @@
     return game.implied && game.implied[side];
   }
 
+  function scoreRow(game) {
+    const live = game && game.live;
+    if (!live || live.show === false || live.state === 'pre') return '';
+    if (live.away_score == null && live.home_score == null) return '';
+    const mid = live.detail || (live.state === 'post' ? 'Final' : '');
+    if (!mid && live.state !== 'in') return '';
+    const away = live.away_score == null ? '' : String(live.away_score);
+    const home = live.home_score == null ? '' : String(live.home_score);
+    return `<div class="score-row" title="${esc(mid || 'Score')}">
+      <div class="score away">${esc(away)}</div>
+      <div class="score-mid">${esc(mid)}</div>
+      <div class="score home">${esc(home)}</div>
+    </div>`;
+  }
+
+  function weekBundle() {
+    return state.week || state.bootstrap;
+  }
+
+  function gamesWantLivePoll(bundle) {
+    if (bundle && bundle.livePoll) return true;
+    return ((bundle && bundle.games) || []).some((g) => g && g.live && g.live.state === 'in');
+  }
+
+  function applyLiveUpdate(payload) {
+    const byGame = (payload && (payload.games || payload.byGame)) || {};
+    const apply = (bundle) => {
+      if (!bundle || !Array.isArray(bundle.games)) return;
+      bundle.games = bundle.games.map((g) => ({
+        ...g,
+        live: Object.prototype.hasOwnProperty.call(byGame, g.game_id) ? byGame[g.game_id] : g.live
+      }));
+      if (payload && payload.livePoll != null) bundle.livePoll = payload.livePoll;
+      if (payload && payload.reason != null) bundle.liveReason = payload.reason;
+    };
+    apply(state.bootstrap);
+    apply(state.week);
+  }
+
+  function stopLivePoll() {
+    if (liveTimer) {
+      clearInterval(liveTimer);
+      liveTimer = null;
+    }
+  }
+
+  function startLivePoll() {
+    if (liveTimer) return;
+    liveTimer = setInterval(async () => {
+      try {
+        const data = await api('/api/live-scores');
+        applyLiveUpdate(data);
+        if (state.page === 'week') render();
+        if (!gamesWantLivePoll(weekBundle())) stopLivePoll();
+      } catch {
+        /* keep the interval while Home is open */
+      }
+    }, LIVE_POLL_MS);
+  }
+
+  function syncLivePoll() {
+    if (state.page !== 'week' || !gamesWantLivePoll(weekBundle())) {
+      stopLivePoll();
+      return;
+    }
+    startLivePoll();
+  }
+
   function card(game) {
     const pick = game.aiPick || {};
     const aiRaw = pick.expected
@@ -970,6 +1042,7 @@
           <div class="role">HOME</div>
         </div>
       </div>
+      ${scoreRow(game)}
       ${cardStatRows(game)}
       <div class="card-foot">
         ${aiRaw ? `<div class="ai"><span>AI Pick:</span> ${esc(aiRaw)}${conf}</div>` : ''}

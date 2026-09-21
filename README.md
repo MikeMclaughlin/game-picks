@@ -10,7 +10,8 @@ Each game can take up to three independent wagers — outright winner, against t
 - Neon Postgres via `DATABASE_URL` and `@neondatabase/serverless` (HTTP)
 - Clerk social sign-in (Google, X/Twitter) via `@clerk/backend` + Clerk browser CDN
 - Vanilla `public/index.html`, `public/styles.css`, `public/app.js`
-- Schedule, scores, and lines from [nfldata.org](https://www.nfldata.org/) (`spread_line`, `total_line`, scores), with GitHub nflverse mirrors and `data/schedule-2026.json` as fallback
+- Schedule, lines, history, and finals grading from [nfldata.org](https://www.nfldata.org/) / nflverse (`spread_line`, `total_line`, scores), with GitHub mirrors and `data/schedule-2026.json` as fallback
+- Live / in-progress scores on Home cards from ESPN’s public scoreboard JSON (`site.web.api.espn.com`). Display only — not used to grade wagers
 
 ## Required env
 
@@ -20,7 +21,7 @@ Each game can take up to three independent wagers — outright winner, against t
 | `CLERK_SECRET_KEY` | Yes, for sign-in | Clerk secret key (`sk_…`) |
 | `CLERK_PUBLISHABLE_KEY` | Yes, for sign-in | Clerk publishable key (`pk_…`). `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` is also accepted (Marketplace name) |
 | `CLERK_JWT_KEY` | Optional | PEM JWT public key for networkless verify |
-| `ADMIN_KEY` | Optional | When set, `/api/import`, `/api/grade-all`, and `/api/cron/scores` require header `x-admin-key` (or `?key=`). `Authorization: Bearer CRON_SECRET` is also accepted |
+| `ADMIN_KEY` | Optional | When set, `/api/import`, `/api/grade-all`, `/api/cron/scores`, and `/api/cron/live-scores` require header `x-admin-key` (or `?key=`). `Authorization: Bearer CRON_SECRET` is also accepted |
 | `CRON_SECRET` | Optional | Vercel cron Bearer token; allowed when `ADMIN_KEY` is set |
 | `PORT` | Optional | Local listen port (default `3000`) |
 | `POOL_SLUG` | Optional | Default pool (default `default`) |
@@ -64,6 +65,8 @@ npm run grade-all
 ```
 
 CLI `grade-all` and `GET`/`POST` `/api/grade-all` share the same grader. Import (including `/api/import` and `/api/cron/scores`) runs `gradeAll` automatically after scores land. Vercel Hobby allows one cron per day, so `/api/cron/scores` runs daily at 12:20 UTC (08:20 ET) to refresh the current season and grade. If `ADMIN_KEY` is set, cron may authenticate with `Authorization: Bearer $CRON_SECRET` or `x-admin-key`.
+
+Home (Current Week) cards show a live score row under the team names while a game is in progress, and after kickoff when ESPN has a final. Away and home scores sit on the sides; quarter + clock (or `Final`) is centered. The Home page polls `GET /api/live-scores` every 5 minutes **only while any current-week game is in progress**. The server never calls ESPN during idle hours/weeks (`espn live: skip idle`). Set `ESPN_LIVE=0` to disable the ESPN client. Manual refresh: `GET /api/cron/live-scores` (same admin gate as the nflverse cron).
 
 AI picks shown on Current Week cards are upserted into `ai_picks` (keyed by `game_id` / season / week). Query later with `GET /api/ai-picks?season=2026&week=2`.
 
