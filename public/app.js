@@ -42,7 +42,8 @@
     standings: null,
     history: null,
     historyError: null,
-    filters: { homeDog: false, projOver: false, projUnder: false },
+    filters: { homeDog: false, projOver: false, projUnder: false, movedLines: false },
+    selectedWeek: null,
     sort: { key: 'season_points', dir: 'desc' },
     historyTeam: 'ALL',
     historyFilters: {
@@ -56,7 +57,10 @@
       roof: 'all',
       role: 'all',
       division: 'all',
-      daysOff: 'all'
+      daysOff: 'all',
+      spread: 'all',
+      total: 'all',
+      timeOfDay: 'all'
     },
     historyMore: false,
     historySort: { key: 'team', dir: 'asc' },
@@ -79,7 +83,8 @@
       division: 'all',
       daysOff: 'all',
       spread: 'all',
-      total: 'all'
+      total: 'all',
+      timeOfDay: 'all'
     },
     backtestChain: [],
     backtestSort: { key: 'gameDate', dir: 'desc' }
@@ -97,13 +102,12 @@
     roof: 'all',
     role: 'all',
     division: 'all',
-    daysOff: 'all'
-  };
-  const DEFAULT_BT = {
-    ...DEFAULT_HIST,
+    daysOff: 'all',
     spread: 'all',
-    total: 'all'
+    total: 'all',
+    timeOfDay: 'all'
   };
+  const DEFAULT_BT = { ...DEFAULT_HIST };
   const LS_WEEK = 'game-picks:week:v1';
   const LS_HISTORY = 'game-picks:history:v1';
   const LS_BACKTEST = 'game-picks:backtest:v1';
@@ -120,9 +124,26 @@
     { dim: 'weather', label: 'Weather', options: [{ value: 'cold', label: 'Cold' }, { value: 'windy', label: 'Windy' }, { value: 'fair', label: 'Fair' }, { value: 'dome', label: 'Dome' }] },
     { dim: 'roof', label: 'Roof', options: [{ value: 'dome', label: 'Dome' }, { value: 'outdoor', label: 'Outdoor' }, { value: 'retractable', label: 'Retractable' }] },
     { dim: 'travel', label: 'Travel', options: [{ value: 'east', label: 'East' }, { value: 'west', label: 'West' }] },
-    { dim: 'distance', label: 'Distance', options: [{ value: 'local', label: 'Local' }, { value: 'cross', label: 'Cross-country' }] }
+    { dim: 'distance', label: 'Distance', options: [{ value: 'local', label: 'Local' }, { value: 'cross', label: 'Cross-country' }] },
+    { dim: 'timeOfDay', label: 'Time of day', options: [{ value: 'morning', label: 'Morning' }, { value: 'early', label: 'Early' }, { value: 'afternoon', label: 'Afternoon' }, { value: 'primetime', label: 'Primetime' }] }
   ];
-  const HIST_CHIP_META = [
+  const FILTER_FIELDS = [
+    { key: 'team', label: 'Team', title: 'Limit results to one team abbreviation. All includes every club.', row: 'primary', options: 'teams' },
+    { key: 'from', label: 'From year', title: 'Inclusive first season in the sample', row: 'primary', options: 'years' },
+    { key: 'to', label: 'To year', title: 'Inclusive last season in the sample', row: 'primary', options: 'years' },
+    { key: 'site', label: 'Site', title: 'Home or road games for the selected team', row: 'primary', options: [{ value: 'all', label: 'All' }, { value: 'home', label: 'Home' }, { value: 'road', label: 'Road' }] },
+    { key: 'weather', label: 'Weather', title: 'Cold is 40°F or below outdoors, windy is 15+ mph outdoors, fair is other outdoor games', row: 'primary', options: [{ value: 'all', label: 'All' }, { value: 'cold', label: 'Cold' }, { value: 'windy', label: 'Windy' }, { value: 'fair', label: 'Fair' }] },
+    { key: 'travel', label: 'Travel', title: 'Road games crossing two or more time zones east or west', row: 'primary', options: [{ value: 'all', label: 'All' }, { value: 'east', label: 'East' }, { value: 'west', label: 'West' }] },
+    { key: 'distance', label: 'Distance', title: 'Local is 0–1 time zones apart. Cross-country is 2 or more. Time zones, not mileage.', row: 'more', options: [{ value: 'all', label: 'All' }, { value: 'local', label: 'Local' }, { value: 'cross', label: 'Cross-country' }] },
+    { key: 'roof', label: 'Roof', title: 'Dome, outdoor, or retractable roof (open or closed)', row: 'more', options: [{ value: 'all', label: 'All' }, { value: 'dome', label: 'Dome' }, { value: 'outdoor', label: 'Outdoor' }, { value: 'retractable', label: 'Retractable' }] },
+    { key: 'role', label: 'Role', title: 'Favorite or underdog from the closing spread. Pick’em games are excluded.', row: 'more', options: [{ value: 'all', label: 'All' }, { value: 'favorite', label: 'Favorite' }, { value: 'underdog', label: 'Underdog' }] },
+    { key: 'division', label: 'Division', title: 'Same-division opponents using the current NFL division map', row: 'more', options: [{ value: 'all', label: 'All' }, { value: 'divisional', label: 'Divisional' }, { value: 'non-div', label: 'Non-div' }] },
+    { key: 'daysOff', label: 'Days off', title: 'Short rest is 5 days or fewer, bye+ is 11 or more, otherwise normal', row: 'more', options: [{ value: 'all', label: 'All' }, { value: 'short', label: 'Short rest' }, { value: 'normal', label: 'Normal' }, { value: 'bye', label: 'Bye+' }] },
+    { key: 'spread', label: 'Spread size', title: 'Absolute closing spread: pick’em is 0, small is 3 or under, medium is 6.5 or under, large is 7 or more', row: 'more', options: [{ value: 'all', label: 'All' }, { value: 'pick', label: 'Pick’em' }, { value: 'small', label: 'Small ≤3' }, { value: 'medium', label: 'Medium ≤6.5' }, { value: 'large', label: 'Large 7+' }] },
+    { key: 'total', label: 'Total', title: 'Closing total: low is under 42, mid is 42 through 47.5, high is 48 or more', row: 'more', options: [{ value: 'all', label: 'All' }, { value: 'low', label: 'Low <42' }, { value: 'mid', label: 'Mid 42–47.5' }, { value: 'high', label: 'High ≥48' }] },
+    { key: 'timeOfDay', label: 'Time of Day', title: 'Kickoff in America/New_York. Morning is before 11:00, Early is 11:00 until 16:00, Afternoon is 16:00 until 19:00, Primetime is 19:00 or later.', row: 'more', options: [{ value: 'all', label: 'All' }, { value: 'morning', label: 'Morning' }, { value: 'early', label: 'Early' }, { value: 'afternoon', label: 'Afternoon' }, { value: 'primetime', label: 'Primetime' }] }
+  ];
+  const CHIP_META = [
     { key: 'team', label: 'Team' },
     { key: 'from', label: 'From year' },
     { key: 'to', label: 'To year' },
@@ -133,15 +154,16 @@
     { key: 'roof', label: 'Roof', names: { dome: 'Dome', outdoor: 'Outdoor', retractable: 'Retractable' } },
     { key: 'role', label: 'Role', names: { favorite: 'Favorite', underdog: 'Underdog' } },
     { key: 'division', label: 'Division', names: { divisional: 'Divisional', 'non-div': 'Non-div' } },
-    { key: 'daysOff', label: 'Days off', names: { short: 'Short rest', normal: 'Normal', bye: 'Bye+' } }
-  ];
-  const SECONDARY_HIST = new Set(['distance', 'roof', 'role', 'division', 'daysOff']);
-  const BT_CHIP_META = [
-    ...HIST_CHIP_META,
+    { key: 'daysOff', label: 'Days off', names: { short: 'Short rest', normal: 'Normal', bye: 'Bye+' } },
     { key: 'spread', label: 'Spread', names: { pick: 'Pick’em', small: 'Small', medium: 'Medium', large: 'Large' } },
-    { key: 'total', label: 'Total', names: { low: 'Low', mid: 'Mid', high: 'High' } }
+    { key: 'total', label: 'Total', names: { low: 'Low', mid: 'Mid', high: 'High' } },
+    { key: 'timeOfDay', label: 'Time of Day', names: { morning: 'Morning', early: 'Early', afternoon: 'Afternoon', primetime: 'Primetime' } }
   ];
-  const SECONDARY_BT = new Set(['distance', 'roof', 'role', 'division', 'daysOff', 'spread', 'total']);
+  const HIST_CHIP_META = CHIP_META;
+  const BT_CHIP_META = CHIP_META;
+  const SECONDARY = new Set(['distance', 'roof', 'role', 'division', 'daysOff', 'spread', 'total', 'timeOfDay']);
+  const SECONDARY_HIST = SECONDARY;
+  const SECONDARY_BT = SECONDARY;
   let loadGen = 0;
   const LIVE_POLL_MS = 5 * 60 * 1000;
   let liveTimer = null;
@@ -163,10 +185,12 @@
     } catch { /* quota / private mode */ }
   }
   function persistWeek() {
-    writeStore(LS_WEEK, { filters: state.filters });
+    writeStore(LS_WEEK, { filters: state.filters, selectedWeek: state.selectedWeek });
+    if (state.page === 'week') syncLocationHash('week');
   }
   function persistHistory() {
     writeStore(LS_HISTORY, { filters: state.historyFilters, more: state.historyMore });
+    if (state.page === 'history') syncLocationHash('history');
   }
   function persistBacktest() {
     writeStore(LS_BACKTEST, {
@@ -174,6 +198,7 @@
       chain: state.backtestChain,
       more: state.backtestMore
     });
+    if (state.page === 'backtest') syncLocationHash('backtest');
   }
   function restoreCriteria() {
     const week = readStore(LS_WEEK, null);
@@ -181,9 +206,14 @@
       state.filters = {
         homeDog: Boolean(week.filters.homeDog),
         projOver: Boolean(week.filters.projOver),
-        projUnder: Boolean(week.filters.projUnder)
+        projUnder: Boolean(week.filters.projUnder),
+        movedLines: Boolean(week.filters.movedLines)
       };
       if (state.filters.projOver && state.filters.projUnder) state.filters.projUnder = false;
+    }
+    if (week && week.selectedWeek != null && week.selectedWeek !== '') {
+      const n = Number(week.selectedWeek);
+      if (Number.isFinite(n)) state.selectedWeek = n;
     }
     const hist = readStore(LS_HISTORY, null);
     if (hist && hist.filters) {
@@ -199,8 +229,8 @@
         .map((s) => ({ dim: String(s.dim), value: s.value == null || s.value === '' ? 'all' : String(s.value) }));
     }
     if (bt && bt.more != null) state.backtestMore = Boolean(bt.more);
+    applyHashState();
   }
-  restoreCriteria();
 
   // Hash routes: #home / #week, #standings, #history, #backtest
   const PAGE_HASH = {
@@ -216,20 +246,127 @@
     history: 'history',
     backtest: 'backtest'
   };
+  restoreCriteria();
 
   function pageFromHash(raw) {
     const h = String(raw == null ? location.hash : raw).replace(/^#/, '').split(/[/?]/)[0].toLowerCase().trim();
     return HASH_PAGE[h] || null;
   }
 
+  function hashQuery(raw) {
+    const h = String(raw == null ? location.hash : raw).replace(/^#/, '');
+    const q = h.indexOf('?');
+    if (q < 0) return new URLSearchParams();
+    return new URLSearchParams(h.slice(q + 1));
+  }
+
+  function normalizeFilterValue(key, value) {
+    if (value == null) return value;
+    const v = String(value).trim();
+    const maps = {
+      site: { away: 'road' },
+      distance: { 'cross-country': 'cross', cross_country: 'cross', crosscountry: 'cross' },
+      roof: { outdoors: 'outdoor' },
+      role: { fav: 'favorite', dog: 'underdog', ud: 'underdog' },
+      division: { div: 'divisional', nondiv: 'non-div', non_div: 'non-div', 'non-divisional': 'non-div' },
+      daysOff: { 'short-rest': 'short', short_rest: 'short', shortrest: 'short', 'bye+': 'bye', 'bye-plus': 'bye', bye_plus: 'bye' },
+      spread: { pickem: 'pick', "pick'em": 'pick', 'pick-em': 'pick' },
+      total: { medium: 'mid' },
+      timeOfDay: { prime: 'primetime', 'prime-time': 'primetime' },
+      weather: { wind: 'windy' },
+      travel: {}
+    };
+    const mapped = maps[key] && maps[key][v.toLowerCase()];
+    return mapped || v;
+  }
+
+  function filtersFromQuery(q, defaults) {
+    const next = { ...defaults };
+    for (const key of Object.keys(defaults)) {
+      if (!q.has(key)) continue;
+      let v = normalizeFilterValue(key, q.get(key));
+      if (key === 'from' || key === 'to') v = Number(v);
+      next[key] = v;
+    }
+    if (Number(next.from) > Number(next.to)) {
+      const swap = next.from;
+      next.from = next.to;
+      next.to = swap;
+    }
+    return next;
+  }
+
+  function queryHasFilter(q, defaults) {
+    return Object.keys(defaults).some((key) => q.has(key));
+  }
+
   function hashForPage(page) {
-    return `#${PAGE_HASH[page] || 'home'}`;
+    const p = new URLSearchParams();
+    if (page === 'week') {
+      if (state.selectedWeek != null && state.bootstrap && Number(state.selectedWeek) !== Number(state.bootstrap.week)) {
+        p.set('week', String(state.selectedWeek));
+      } else if (state.selectedWeek != null && !state.bootstrap) {
+        p.set('week', String(state.selectedWeek));
+      }
+      if (state.filters.movedLines) p.set('moved', '1');
+      if (state.filters.homeDog) p.set('homeDog', '1');
+      if (state.filters.projOver) p.set('over', '1');
+      if (state.filters.projUnder) p.set('under', '1');
+    } else if (page === 'history' || page === 'backtest') {
+      const filters = page === 'history' ? state.historyFilters : state.backtestFilters;
+      const defaults = page === 'history' ? DEFAULT_HIST : DEFAULT_BT;
+      for (const key of Object.keys(defaults)) {
+        if (String(filters[key]) !== String(defaults[key])) p.set(key, String(filters[key]));
+      }
+      if (page === 'backtest') {
+        const steps = (state.backtestChain || []).filter((s) => s && s.dim && s.value && s.value !== 'all');
+        if (steps.length) p.set('chain', steps.map((s) => `${s.dim}:${s.value}`).join(','));
+      }
+    }
+    const q = p.toString();
+    const base = PAGE_HASH[page] || 'home';
+    return q ? `#${base}?${q}` : `#${base}`;
+  }
+
+  function applyHashState() {
+    const page = pageFromHash();
+    const q = hashQuery();
+    if (page === 'history') {
+      if (queryHasFilter(q, DEFAULT_HIST)) {
+        state.historyFilters = filtersFromQuery(q, DEFAULT_HIST);
+        state.historyTeam = state.historyFilters.team;
+      }
+      return;
+    }
+    if (page === 'backtest') {
+      if (queryHasFilter(q, DEFAULT_BT) || q.has('chain')) {
+        if (queryHasFilter(q, DEFAULT_BT)) state.backtestFilters = filtersFromQuery(q, DEFAULT_BT);
+        if (q.has('chain')) {
+          state.backtestChain = String(q.get('chain') || '').split(',').filter(Boolean).map((part) => {
+            const idx = part.indexOf(':');
+            if (idx < 0) return null;
+            return { dim: part.slice(0, idx), value: part.slice(idx + 1) || 'all' };
+          }).filter(Boolean);
+        }
+      }
+      return;
+    }
+    if (page === 'week' || page == null) {
+      const weekKeys = ['week', 'moved', 'homeDog', 'over', 'under'];
+      if (!weekKeys.some((key) => q.has(key))) return;
+      state.selectedWeek = q.has('week') && q.get('week') !== '' ? Number(q.get('week')) : null;
+      state.filters.movedLines = q.get('moved') === '1';
+      state.filters.homeDog = q.get('homeDog') === '1';
+      state.filters.projOver = q.get('over') === '1';
+      state.filters.projUnder = q.get('under') === '1';
+      if (state.filters.projOver && state.filters.projUnder) state.filters.projUnder = false;
+    }
   }
 
   function syncLocationHash(page) {
     const want = hashForPage(page);
     if (location.hash === want) return;
-    if (page === 'week' && location.hash === '#week') return;
+    if (page === 'week' && (location.hash === '#week' || location.hash === '#home') && (want === '#home' || want === '#week')) return;
     const next = `${location.pathname}${location.search}${want}`;
     if (typeof history.replaceState === 'function') history.replaceState(null, '', next);
     else location.hash = want;
@@ -262,14 +399,17 @@
     const fromHash = Boolean(opts && opts.fromHash);
     const next = page === 'home' ? 'week' : page;
     if (!PAGE_HASH[next]) return;
+    if (fromHash) applyHashState();
     const changed = state.page !== next;
     if (changed) {
       state.page = next;
       resetPageData(next);
+    } else if (opts && opts.reload) {
+      resetPageData(next);
     }
     if (!fromHash) syncLocationHash(state.page);
     highlightTabs();
-    if (changed) {
+    if (changed || (opts && opts.reload)) {
       render();
       syncLivePoll();
       load().catch(showPageError);
@@ -583,8 +723,6 @@
   function backtestQuery(filters, chain) {
     const f = filters || state.backtestFilters;
     const p = new URLSearchParams(historyQuery(f));
-    if (f.spread && f.spread !== 'all') p.set('spread', f.spread);
-    if (f.total && f.total !== 'all') p.set('total', f.total);
     const steps = (chain || state.backtestChain || []).filter((s) => s && s.dim && s.value && s.value !== 'all');
     if (steps.length) p.set('chain', steps.map((s) => `${s.dim}:${s.value}`).join(','));
     return p.toString();
@@ -593,17 +731,10 @@
   function historyQuery(filters) {
     const f = filters || state.historyFilters;
     const p = new URLSearchParams();
-    p.set('team', f.team);
-    p.set('from', String(f.from));
-    p.set('to', String(f.to));
-    p.set('site', f.site);
-    p.set('weather', f.weather);
-    p.set('travel', f.travel);
-    p.set('distance', f.distance);
-    p.set('roof', f.roof);
-    p.set('role', f.role);
-    p.set('division', f.division);
-    p.set('daysOff', f.daysOff);
+    for (const key of Object.keys(DEFAULT_HIST)) {
+      if (f[key] == null || f[key] === '') continue;
+      p.set(key, String(f[key]));
+    }
     return p.toString();
   }
 
@@ -630,13 +761,42 @@
     app.innerHTML = `<p class="notice">${(err && err.message) || 'Request failed'}</p>`;
   }
 
+  const navToggle = document.getElementById('nav-toggle');
+  function closeMenu() {
+    document.body.classList.remove('menu-open');
+    if (navToggle) {
+      navToggle.setAttribute('aria-expanded', 'false');
+      navToggle.title = 'Open the account menu';
+    }
+  }
+  function toggleMenu() {
+    const open = document.body.classList.toggle('menu-open');
+    if (navToggle) {
+      navToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+      navToggle.title = open ? 'Close the account menu' : 'Open the account menu';
+    }
+  }
+  if (navToggle) {
+    navToggle.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleMenu();
+    });
+  }
+  document.addEventListener('click', (e) => {
+    if (!document.body.classList.contains('menu-open')) return;
+    if (e.target.closest('#auth-slot') || e.target.closest('#nav-toggle')) return;
+    closeMenu();
+  });
+
   tabs.addEventListener('click', (e) => {
     const btn = e.target.closest('button[data-page]');
     if (!btn) return;
+    closeMenu();
     selectPage(btn.dataset.page);
   });
   window.addEventListener('hashchange', () => {
-    selectPage(pageFromHash() || 'week', { fromHash: true });
+    closeMenu();
+    selectPage(pageFromHash() || 'week', { fromHash: true, reload: true });
   });
 
   if (signedOutEl) {
@@ -683,7 +843,8 @@
     render();
     try {
       if (state.page === 'week' && !state.week) {
-        const week = await api(`/api/week?season=${state.bootstrap.season}&week=${state.bootstrap.week}`);
+        const weekNum = state.selectedWeek || state.bootstrap.week;
+        const week = await api(`/api/week?season=${state.bootstrap.season}&week=${weekNum}`);
         if (gen !== loadGen) return;
         state.week = week;
       }
@@ -745,6 +906,11 @@
     if (state.filters.homeDog && !g.homeUnderdog) return false;
     if (state.filters.projOver && !g.projectedOver) return false;
     if (state.filters.projUnder && !g.projectedUnder) return false;
+    if (state.filters.movedLines) {
+      const spreadMoved = g.spreadMove && g.spreadMove.moved;
+      const totalMoved = g.totalMove && g.totalMove.moved;
+      if (!spreadMoved && !totalMoved) return false;
+    }
     return true;
   }
 
@@ -971,18 +1137,126 @@
     return game.implied && game.implied[side];
   }
 
+  const cardOpen = new Map();
+
+  function numOrNull(value) {
+    if (value == null || value === '') return null;
+    const n = Number(value);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  function cardPhase(game) {
+    const live = game && game.live;
+    const st = live ? String(live.state || '').toLowerCase() : '';
+    if (st === 'in') return 'live';
+    const dbFinal = numOrNull(game && game.home_score) != null && numOrNull(game && game.away_score) != null;
+    const liveFinal = Boolean(live && (st === 'post' || live.completed) && numOrNull(live.home_score) != null && numOrNull(live.away_score) != null);
+    if (dbFinal || liveFinal || (game && game.phase === 'final')) return 'final';
+    if (game && game.locked) return 'live';
+    if (game && game.phase === 'live') return 'live';
+    return 'pre';
+  }
+
+  function cardExpanded(game) {
+    if (cardOpen.has(game.game_id)) return cardOpen.get(game.game_id);
+    return cardPhase(game) !== 'final';
+  }
+
+  function formatLineText(n) {
+    const num = Number(n);
+    if (!Number.isFinite(num)) return '';
+    const rounded = Math.round(num * 10) / 10;
+    return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+  }
+
+  function signedLineText(line) {
+    const shown = formatLineText(line);
+    if (!shown) return '';
+    return Number(line) > 0 ? `+${shown}` : shown;
+  }
+
+  function finalScorePair(game) {
+    const live = game && game.live;
+    const st = live ? String(live.state || '').toLowerCase() : '';
+    if (st === 'in') return null;
+    const hs = numOrNull(game && game.home_score);
+    const as = numOrNull(game && game.away_score);
+    if (hs != null && as != null) return { home: hs, away: as };
+    if (live && (st === 'post' || live.completed)) {
+      const lh = numOrNull(live.home_score);
+      const la = numOrNull(live.away_score);
+      if (lh != null && la != null) return { home: lh, away: la };
+    }
+    return null;
+  }
+
+  function settleText(game) {
+    if (cardPhase(game) !== 'final') return '';
+    const scores = finalScorePair(game);
+    if (!scores && game.settle && game.settle.text) return game.settle.text;
+    if (!scores) return game.settle && game.settle.text ? game.settle.text : '';
+    const home = scores.home;
+    const away = scores.away;
+    const spread = numOrNull(game.spread_line);
+    const total = numOrNull(game.total_line);
+    const close = (a, b) => Math.abs(a - b) < 0.001;
+    let coverText = '';
+    if (spread != null) {
+      const margin = home - away;
+      if (close(home, away)) {
+        if (close(margin, spread)) coverText = 'SU tie · spread PUSH';
+        else {
+          const coverTeam = margin > spread ? game.home_team : game.away_team;
+          const line = coverTeam === game.home_team ? -spread : spread;
+          coverText = `SU tie · ${coverTeam} covered ${signedLineText(line)}`;
+        }
+      } else {
+        const winner = home > away ? game.home_team : game.away_team;
+        const winnerLine = winner === game.home_team ? -spread : spread;
+        if (close(margin, spread)) coverText = `${winner} push ${signedLineText(winnerLine)}`;
+        else if ((margin > spread ? game.home_team : game.away_team) === winner) {
+          coverText = `${winner} covered ${signedLineText(winnerLine)}`;
+        } else coverText = `${winner} did NOT cover ${formatLineText(Math.abs(spread))}`;
+      }
+    }
+    let totalText = '';
+    if (total != null) {
+      const sum = home + away;
+      const shown = formatLineText(total);
+      if (close(sum, total)) totalText = `score was PUSH ${shown}`;
+      else if (sum > total) totalText = `score was OVER ${shown}`;
+      else totalText = `score was UNDER ${shown}`;
+    }
+    return [coverText, totalText].filter(Boolean).join(' ');
+  }
+
   function scoreRow(game) {
     const live = game && game.live;
-    if (!live || live.show === false || live.state === 'pre') return '';
-    if (live.away_score == null && live.home_score == null) return '';
-    const mid = live.detail || (live.state === 'post' ? 'Final' : '');
-    if (!mid && live.state !== 'in') return '';
-    const away = live.away_score == null ? '' : String(live.away_score);
-    const home = live.home_score == null ? '' : String(live.home_score);
+    const st = live ? String(live.state || '').toLowerCase() : '';
+    let away = null;
+    let home = null;
+    let mid = '';
+    if (st === 'in') {
+      away = live.away_score;
+      home = live.home_score;
+      mid = live.detail || '';
+    } else if (live && (st === 'post' || live.completed) && live.away_score != null && live.home_score != null) {
+      away = live.away_score;
+      home = live.home_score;
+      mid = live.detail || 'Final';
+    } else if (game.home_score != null && game.away_score != null && game.home_score !== '' && game.away_score !== '') {
+      away = game.away_score;
+      home = game.home_score;
+      mid = 'Final';
+    } else {
+      return '';
+    }
+    if (away == null && home == null) return '';
+    if (!mid && st !== 'in') return '';
     return `<div class="score-row" title="${esc(mid || 'Score')}">
-      <div class="score away">${esc(away)}</div>
+      <div class="score away">${esc(away == null ? '' : String(away))}</div>
       <div class="score-mid">${esc(mid)}</div>
-      <div class="score home">${esc(home)}</div>
+      <div class="score home">${esc(home == null ? '' : String(home))}</div>
     </div>`;
   }
 
@@ -1049,7 +1323,10 @@
     const awayCity = (game.away && game.away.city) || game.away_team;
     const homeCity = (game.home && game.home.city) || game.home_team;
     const slot = kickoffSlotClass(game);
-    return `<article class="card matchup${game.locked ? ' locked' : ''}${slot ? ` ${esc(slot)}` : ''}">
+    const phase = cardPhase(game);
+    const expanded = cardExpanded(game);
+    const settled = phase === 'final' ? settleText(game) : '';
+    return `<article class="card matchup${game.locked ? ' locked' : ''}${expanded ? '' : ' is-collapsed'}${slot ? ` ${esc(slot)}` : ''}">
       <div class="card-head">
         <span class="kick">${esc(kickoffLabel(game))}</span>
         <span class="status${game.locked ? ' lock' : ''}">${game.locked ? 'LOCKED' : 'OPEN'}</span>
@@ -1066,24 +1343,130 @@
         </div>
       </div>
       ${scoreRow(game)}
-      ${cardStatRows(game)}
-      <div class="card-foot">
-        ${aiRaw ? `<div class="ai"><span>AI Pick:</span> ${esc(aiRaw)}${conf}</div>` : ''}
-        <div class="picks">
-          ${pickRow(game, 'outright', game.away_team, game.home_team, outrightPickLabel(game.away_team), outrightPickLabel(game.home_team))}
-          ${pickRow(game, 'ats', game.away_team, game.home_team, atsPickLabel(game, game.away_team), atsPickLabel(game, game.home_team), {
-            leftHtml: atsButtonHtml(game, game.away_team),
-            rightHtml: atsButtonHtml(game, game.home_team),
-            move: lineMoveHtml(game.spreadMove)
-          })}
-          ${pickRow(game, 'ou', 'over', 'under', ouPickLabel(game, 'over'), ouPickLabel(game, 'under'), {
-            leftHtml: ouButtonHtml(game, 'over'),
-            rightHtml: ouButtonHtml(game, 'under'),
-            move: lineMoveHtml(game.totalMove)
-          })}
+      ${settled ? `<div class="settle-strip" title="Closing spread and total: whether the winner covered, and over, under, or push">${esc(settled)}</div>` : ''}
+      <button type="button" class="details-toggle" data-details="${esc(game.game_id)}" title="Show or hide team stats, the AI pick, and pick buttons">${expanded ? '▲ HIDE' : '▼ DETAILS'}</button>
+      <div class="card-details"${expanded ? '' : ' hidden'}>
+        ${cardStatRows(game)}
+        <div class="card-foot">
+          ${aiRaw ? `<div class="ai"><span>AI Pick:</span> ${esc(aiRaw)}${conf}</div>` : ''}
+          <div class="picks">
+            ${pickRow(game, 'outright', game.away_team, game.home_team, outrightPickLabel(game.away_team), outrightPickLabel(game.home_team))}
+            ${pickRow(game, 'ats', game.away_team, game.home_team, atsPickLabel(game, game.away_team), atsPickLabel(game, game.home_team), {
+              leftHtml: atsButtonHtml(game, game.away_team),
+              rightHtml: atsButtonHtml(game, game.home_team),
+              move: lineMoveHtml(game.spreadMove)
+            })}
+            ${pickRow(game, 'ou', 'over', 'under', ouPickLabel(game, 'over'), ouPickLabel(game, 'under'), {
+              leftHtml: ouButtonHtml(game, 'over'),
+              rightHtml: ouButtonHtml(game, 'under'),
+              move: lineMoveHtml(game.totalMove)
+            })}
+          </div>
         </div>
       </div>
     </article>`;
+  }
+
+  function recordLabel(rec) {
+    if (!rec) return '0-0';
+    if (rec.label) return rec.label;
+    const ties = Number(rec.ties) || 0;
+    const wins = Number(rec.wins) || 0;
+    const losses = Number(rec.losses) || 0;
+    return ties ? `${wins}-${losses}-${ties}` : `${wins}-${losses}`;
+  }
+
+  function pushTally(list) {
+    let wins = 0;
+    let losses = 0;
+    let ties = 0;
+    for (const r of list) {
+      if (r === 'win' || r === 'W') wins += 1;
+      else if (r === 'loss' || r === 'L') losses += 1;
+      else if (r === 'push' || r === 'P' || r === 'T') ties += 1;
+    }
+    return { wins, losses, ties, graded: wins + losses + ties, label: ties ? `${wins}-${losses}-${ties}` : `${wins}-${losses}` };
+  }
+
+  function gradeMarket(game, market, selection) {
+    const scores = finalScorePair(game);
+    if (!scores) return null;
+    if (market === 'outright') {
+      if (scores.home === scores.away) return 'push';
+      const winner = scores.home > scores.away ? game.home_team : game.away_team;
+      return String(selection).toUpperCase() === winner ? 'win' : 'loss';
+    }
+    if (market === 'ats') {
+      const spread = numOrNull(game.spread_line);
+      if (spread == null) return null;
+      const margin = scores.home - scores.away;
+      if (Math.abs(margin - spread) < 0.001) return 'push';
+      const cover = margin > spread ? game.home_team : game.away_team;
+      return String(selection).toUpperCase() === cover ? 'win' : 'loss';
+    }
+    if (market === 'ou') {
+      const line = numOrNull(game.total_line);
+      if (line == null) return null;
+      const sum = scores.home + scores.away;
+      if (Math.abs(sum - line) < 0.001) return 'push';
+      const side = sum > line ? 'over' : 'under';
+      return String(selection).toLowerCase() === side ? 'win' : 'loss';
+    }
+    return null;
+  }
+
+  function gradeWeekVersus(games, signedIn) {
+    const aiAts = [];
+    const aiOu = [];
+    const userAts = [];
+    const userOu = [];
+    const userOut = [];
+    for (const game of games || []) {
+      if (cardPhase(game) !== 'final') continue;
+      const ai = game.aiPick || {};
+      if (ai.atsTeam) {
+        const r = gradeMarket(game, 'ats', ai.atsTeam);
+        if (r) aiAts.push(r);
+      }
+      if (ai.ou) {
+        const r = gradeMarket(game, 'ou', ai.ou);
+        if (r) aiOu.push(r);
+      }
+      if (!signedIn) continue;
+      for (const w of game.wagers || []) {
+        if (!w || !w.selection) continue;
+        let result = w.result;
+        if (!result || result === 'ungraded') result = gradeMarket(game, w.market, w.selection);
+        if (!result || result === 'ungraded') continue;
+        if (w.market === 'ats') userAts.push(result);
+        else if (w.market === 'ou') userOu.push(result);
+        else if (w.market === 'outright') userOut.push(result);
+      }
+    }
+    return {
+      signedIn: Boolean(signedIn),
+      ai: { ats: pushTally(aiAts), ou: pushTally(aiOu) },
+      user: signedIn ? { ats: pushTally(userAts), ou: pushTally(userOu), outright: pushTally(userOut) } : null
+    };
+  }
+
+  function versusStrip(games) {
+    const board = gradeWeekVersus(games, Boolean((state.week && state.week.user) || (state.bootstrap && state.bootstrap.user)));
+    if (!board.signedIn) {
+      return `<p class="vs-strip muted" title="Sign in to compare your graded ATS, over/under, and outright results with the AI for this week">Sign in to compare your week with the AI.</p>`;
+    }
+    const you = board.user;
+    const ai = board.ai;
+    const outright = you.outright && you.outright.graded
+      ? `<span>You outright <b>${esc(recordLabel(you.outright))}</b></span>`
+      : '';
+    return `<div class="vs-strip" title="Your graded wagers this week versus the AI. Records are W-L, or W-L-T when a tie or push is included.">
+      <span>You ATS <b>${esc(recordLabel(you.ats))}</b></span>
+      <span>AI ATS <b>${esc(recordLabel(ai.ats))}</b></span>
+      <span>You O/U <b>${esc(recordLabel(you.ou))}</b></span>
+      <span>AI O/U <b>${esc(recordLabel(ai.ou))}</b></span>
+      ${outright}
+    </div>`;
   }
 
   function myWeekStrip(games) {
@@ -1121,12 +1504,21 @@
 
   function abbrevKey() {
     return `<p class="abbrev-key">
-      <span><b>W-L</b> win–loss</span>
-      <span><b>C-F</b> cover–fail (ATS)</span>
+      <span><b>W-L-T</b> win–loss-tie</span>
+      <span><b>C-F-P</b> cover/fail/push (ATS)</span>
       <span><b>xPts</b> expected points</span>
       <span><b>ATS</b> against the spread</span>
-      <span><b>OU</b> over/under</span>
+      <span><b>OU</b> over/under/push</span>
     </p>`;
+  }
+
+  function weekPicker(w) {
+    const weeks = (w && w.weeks) || (state.bootstrap && state.bootstrap.weeks) || [];
+    if (!weeks.length) return '';
+    const current = w && w.week;
+    const season = (w && w.season) || (state.bootstrap && state.bootstrap.season) || '';
+    const opts = weeks.map((n) => `<option value="${n}"${Number(n) === Number(current) ? ' selected' : ''}>Week ${n}</option>`).join('');
+    return `<label class="week-pick">Week <select data-week-select title="Choose a week of the ${esc(season)} season, including completed weeks">${opts}</select></label>`;
   }
 
   function weekView() {
@@ -1142,11 +1534,14 @@
         <div>This week <strong>${fmtInt(strip.week)}</strong></div>
         <div>Locks at kickoff <strong>${fmtInt(strip.locks)}</strong></div>
       </div>
+      ${versusStrip(w.games || [])}
       ${abbrevKey()}
       <div class="filters">
+        ${weekPicker(w)}
         <button type="button" class="chip${state.filters.homeDog ? ' on' : ''}" data-filter="homeDog" title="Show home underdogs only">Home underdogs</button>
         <button type="button" class="chip${state.filters.projOver ? ' on' : ''}" data-filter="projOver" title="Show games projected over the total">Projected over</button>
         <button type="button" class="chip${state.filters.projUnder ? ' on' : ''}" data-filter="projUnder" title="Show games projected under the total">Projected under</button>
+        <button type="button" class="chip${state.filters.movedLines ? ' on' : ''}" data-filter="movedLines" title="Show only games whose spread or total has moved from the opening line">Moved lines only</button>
       </div>
       <div class="cards week-cards" id="week-cards">${games.map(card).join('') || '<p>No games match those filters.</p>'}</div>
     </section>`;
@@ -1159,8 +1554,9 @@
       { key: 'season_points', label: 'Season', title: 'Season points (1 per correct wager)' },
       { key: 'weekly_points', label: 'Week', title: 'Points scored this week (tie-break)' },
       { key: 'wagers', label: 'Wagers', title: 'Number of wagers this season' },
-      { key: 'wins', label: 'Wins', title: 'Correct settled wagers' },
-      { key: 'win_pct', label: 'Win%', title: 'Wins divided by settled wagers (pushes excluded from wins)' }
+      { key: 'record', label: 'Record', title: 'Settled wagers as wins–losses–ties. Pushes count as ties.' },
+      { key: 'wins', label: 'Wins', title: 'Correct settled wagers. Pushes are not wins.' },
+      { key: 'win_pct', label: 'Win%', title: 'Wins divided by wins plus losses. Pushes are excluded.' }
     ];
     const me = state.bootstrap && state.bootstrap.user && state.bootstrap.user.username;
     const sorted = [...rows];
@@ -1184,9 +1580,10 @@
         <td>${r.season_points}</td>
         <td>${r.weekly_points}</td>
         <td>${r.wagers}</td>
+        <td>${esc(r.record || recordLabel(r))}</td>
         <td>${r.wins}</td>
         <td>${fmtPct(r.win_pct)}</td>
-      </tr>`).join('') || '<tr><td colspan="7">No players yet.</td></tr>'}</tbody>
+      </tr>`).join('') || '<tr><td colspan="8">No players yet.</td></tr>'}</tbody>
     </table>`;
   }
 
@@ -1264,47 +1661,53 @@
     return copy;
   }
 
-  function historyFiltersForm() {
-    const f = state.historyFilters;
+  function filtersForm(which) {
+    const historyPage = which === 'history';
+    const filters = historyPage ? state.historyFilters : state.backtestFilters;
+    const defaults = historyPage ? DEFAULT_HIST : DEFAULT_BT;
+    const chips = historyPage ? activeHistChips() : activeBtChips();
+    const moreFlag = historyPage ? state.historyMore : state.backtestMore;
+    const moreOpen = moreFlag || chips.some((c) => SECONDARY.has(c.key));
     const teams = ['ALL', ...(state.bootstrap?.teams || [])];
-    const years = yearsForHistory();
-    const moreOpen = state.historyMore || activeHistChips().some((c) => SECONDARY_HIST.has(c.key));
-    const chips = activeHistChips();
-    return `<form id="hist-filters" class="hist-bar">
+    const years = historyPage ? yearsForHistory() : ((state.backtest && state.backtest.seasons) || yearsForHistory());
+    const fieldHtml = (row) => FILTER_FIELDS.filter((field) => field.row === row).map((field) => {
+      const options = field.options === 'teams' ? teams : field.options === 'years' ? years : field.options;
+      return filterField(field.label, field.key, field.title, options, filters, defaults);
+    }).join('');
+    const moreAttr = historyPage ? 'data-hist-more' : 'data-bt-more';
+    const resetAttr = historyPage ? 'data-hist-reset' : 'data-bt-reset';
+    const chipAttr = historyPage ? 'data-chip-clear' : 'data-bt-chip-clear';
+    const moreId = historyPage ? 'hist-more' : 'bt-more';
+    const formId = historyPage ? 'hist-filters' : 'bt-filters';
+    return `<form id="${formId}" class="hist-bar">
       <div class="hist-row">
-        ${filterField('Team', 'team', 'Filter splits to one team', teams, f, DEFAULT_HIST)}
-        ${filterField('From year', 'from', 'Inclusive start season', years, f, DEFAULT_HIST)}
-        ${filterField('To year', 'to', 'Inclusive end season', years, f, DEFAULT_HIST)}
-        ${filterField('Site', 'site', 'Home or road games for the team', [{ value: 'all', label: 'All' }, { value: 'home', label: 'Home' }, { value: 'road', label: 'Road' }], f, DEFAULT_HIST)}
-        ${filterField('Weather', 'weather', 'Cold ≤40°F, windy 15+ mph, fair outdoor otherwise', [{ value: 'all', label: 'All' }, { value: 'cold', label: 'Cold' }, { value: 'windy', label: 'Windy' }, { value: 'fair', label: 'Fair' }], f, DEFAULT_HIST)}
-        ${filterField('Travel', 'travel', 'Road games crossing 2+ time zones', [{ value: 'all', label: 'All' }, { value: 'east', label: 'East' }, { value: 'west', label: 'West' }], f, DEFAULT_HIST)}
+        ${fieldHtml('primary')}
         <div class="hist-actions">
-          <button type="button" class="btn-more" data-hist-more aria-expanded="${moreOpen ? 'true' : 'false'}">${moreOpen ? 'Fewer filters' : 'More filters'}</button>
-          <button type="button" class="btn-reset" data-hist-reset>Reset</button>
+          <button type="button" class="btn-more" ${moreAttr} title="Show or hide spread size, total, time of day, and the other filters" aria-expanded="${moreOpen ? 'true' : 'false'}">${moreOpen ? 'Fewer filters' : 'More filters'}</button>
+          <button type="button" class="btn-reset" ${resetAttr} title="Reset every filter to All">Reset</button>
         </div>
       </div>
-      <div class="hist-row" id="hist-more" ${moreOpen ? '' : 'hidden'}>
-        ${filterField('Distance', 'distance', 'Local = 0–1 time zones; cross-country = 2+', [{ value: 'all', label: 'All' }, { value: 'local', label: 'Local' }, { value: 'cross', label: 'Cross-country' }], f, DEFAULT_HIST)}
-        ${filterField('Roof', 'roof', 'Dome, outdoor, or retractable (open/closed)', [{ value: 'all', label: 'All' }, { value: 'dome', label: 'Dome' }, { value: 'outdoor', label: 'Outdoor' }, { value: 'retractable', label: 'Retractable' }], f, DEFAULT_HIST)}
-        ${filterField('Role', 'role', 'Favorite or underdog from the spread', [{ value: 'all', label: 'All' }, { value: 'favorite', label: 'Favorite' }, { value: 'underdog', label: 'Underdog' }], f, DEFAULT_HIST)}
-        ${filterField('Division', 'division', 'Same-division opponents', [{ value: 'all', label: 'All' }, { value: 'divisional', label: 'Divisional' }, { value: 'non-div', label: 'Non-div' }], f, DEFAULT_HIST)}
-        ${filterField('Days off', 'daysOff', 'Short rest ≤5 days, bye+ ≥11, else normal', [{ value: 'all', label: 'All' }, { value: 'short', label: 'Short rest' }, { value: 'normal', label: 'Normal' }, { value: 'bye', label: 'Bye+' }], f, DEFAULT_HIST)}
+      <div class="hist-row" id="${moreId}" ${moreOpen ? '' : 'hidden'}>
+        ${fieldHtml('more')}
       </div>
-      ${chips.length ? `<div class="hist-chips">${chips.map((c) => `<button type="button" class="filter-chip on" data-chip-clear="${c.key}" title="Clear ${c.text}">${c.text} ×</button>`).join('')}</div>` : ''}
-    </form>
-    <p class="hist-hint">Filters narrow the schedule seed; table updates as you change them.</p>`;
+      ${chips.length ? `<div class="hist-chips">${chips.map((c) => `<button type="button" class="filter-chip on" ${chipAttr}="${c.key}" title="Clear ${esc(c.text)}">${esc(c.text)} ×</button>`).join('')}</div>` : ''}
+    </form>${historyPage ? '<p class="hist-hint">Filters narrow the schedule seed; table updates as you change them.</p>' : ''}`;
+  }
+
+  function historyFiltersForm() {
+    return filtersForm('history');
   }
 
   function historyTable(rows) {
     const cols = [
       { key: 'team', label: 'Team', title: 'Team abbreviation' },
       { key: 'games', label: 'G', title: 'Games matching the current filters' },
-      { key: 'ats', label: 'ATS', title: 'Against the spread record' },
-      { key: 'ou', label: 'O/U', title: 'Over/under record (overs-unders-pushes)' },
+      { key: 'ats', label: 'ATS', title: 'Against the spread record as cover–fail–push' },
+      { key: 'ou', label: 'O/U', title: 'Over/under/push record (overs-unders-pushes)' },
       { key: 'home', label: 'Home', title: 'Straight-up home record in the filtered set' },
       { key: 'road', label: 'Road', title: 'Straight-up road record in the filtered set' },
-      { key: 'favorite', label: 'Favorite', title: 'Straight-up wins-losses when the team is a favorite' },
-      { key: 'dog', label: 'Underdog', title: 'Straight-up wins-losses when the team is an underdog' }
+      { key: 'favorite', label: 'Favorite', title: 'Straight-up wins–losses–ties when the team is a favorite' },
+      { key: 'dog', label: 'Underdog', title: 'Straight-up wins–losses–ties when the team is an underdog' }
     ];
     const sorted = sortedHistoryRows(rows);
     const { key, dir } = state.historySort;
@@ -1383,35 +1786,7 @@
   }
 
   function backtestFiltersForm() {
-    const f = state.backtestFilters;
-    const teams = ['ALL', ...(state.bootstrap?.teams || [])];
-    const years = (state.backtest && state.backtest.seasons) || yearsForHistory();
-    const moreOpen = state.backtestMore || activeBtChips().some((c) => SECONDARY_BT.has(c.key));
-    const chips = activeBtChips();
-    return `<form id="bt-filters" class="hist-bar">
-      <div class="hist-row">
-        ${filterField('Team', 'team', 'Team-relative slice', teams, f, DEFAULT_BT)}
-        ${filterField('From year', 'from', 'Inclusive start season', years, f, DEFAULT_BT)}
-        ${filterField('To year', 'to', 'Inclusive end season', years, f, DEFAULT_BT)}
-        ${filterField('Site', 'site', 'Home or road games for the team', [{ value: 'all', label: 'All' }, { value: 'home', label: 'Home' }, { value: 'road', label: 'Road' }], f, DEFAULT_BT)}
-        ${filterField('Weather', 'weather', 'Cold ≤40°F, windy 15+ mph, fair outdoor otherwise', [{ value: 'all', label: 'All' }, { value: 'cold', label: 'Cold' }, { value: 'windy', label: 'Windy' }, { value: 'fair', label: 'Fair' }], f, DEFAULT_BT)}
-        ${filterField('Travel', 'travel', 'Road games crossing 2+ time zones', [{ value: 'all', label: 'All' }, { value: 'east', label: 'East' }, { value: 'west', label: 'West' }], f, DEFAULT_BT)}
-        <div class="hist-actions">
-          <button type="button" class="btn-more" data-bt-more aria-expanded="${moreOpen ? 'true' : 'false'}">${moreOpen ? 'Fewer filters' : 'More filters'}</button>
-          <button type="button" class="btn-reset" data-bt-reset>Reset</button>
-        </div>
-      </div>
-      <div class="hist-row" id="bt-more" ${moreOpen ? '' : 'hidden'}>
-        ${filterField('Distance', 'distance', 'Local = 0–1 time zones; cross-country = 2+', [{ value: 'all', label: 'All' }, { value: 'local', label: 'Local' }, { value: 'cross', label: 'Cross-country' }], f, DEFAULT_BT)}
-        ${filterField('Roof', 'roof', 'Dome, outdoor, or retractable (open/closed)', [{ value: 'all', label: 'All' }, { value: 'dome', label: 'Dome' }, { value: 'outdoor', label: 'Outdoor' }, { value: 'retractable', label: 'Retractable' }], f, DEFAULT_BT)}
-        ${filterField('Role', 'role', 'Favorite or underdog from the spread', [{ value: 'all', label: 'All' }, { value: 'favorite', label: 'Favorite' }, { value: 'underdog', label: 'Underdog' }], f, DEFAULT_BT)}
-        ${filterField('Division', 'division', 'Same-division opponents', [{ value: 'all', label: 'All' }, { value: 'divisional', label: 'Divisional' }, { value: 'non-div', label: 'Non-div' }], f, DEFAULT_BT)}
-        ${filterField('Days off', 'daysOff', 'Short rest ≤5 days, bye+ ≥11, else normal', [{ value: 'all', label: 'All' }, { value: 'short', label: 'Short rest' }, { value: 'normal', label: 'Normal' }, { value: 'bye', label: 'Bye+' }], f, DEFAULT_BT)}
-        ${filterField('Spread size', 'spread', '|spread_line| buckets', [{ value: 'all', label: 'All' }, { value: 'pick', label: 'Pick’em' }, { value: 'small', label: 'Small ≤3' }, { value: 'medium', label: 'Medium ≤6.5' }, { value: 'large', label: 'Large 7+' }], f, DEFAULT_BT)}
-        ${filterField('Total', 'total', 'Closing total buckets', [{ value: 'all', label: 'All' }, { value: 'low', label: 'Low <42' }, { value: 'mid', label: 'Mid 42–47.5' }, { value: 'high', label: 'High ≥48' }], f, DEFAULT_BT)}
-      </div>
-      ${chips.length ? `<div class="hist-chips">${chips.map((c) => `<button type="button" class="filter-chip on" data-bt-chip-clear="${c.key}" title="Clear ${c.text}">${c.text} ×</button>`).join('')}</div>` : ''}
-    </form>`;
+    return filtersForm('backtest');
   }
 
   function chainBuilder() {
@@ -1421,8 +1796,8 @@
       <p class="bt-note">Ordered pre-game states. The next-game distribution is the slice that matches every step. Last-5 hot = 4–5 wins/covers; cold = 0–1. Filters above apply first.</p>
       ${steps.map((step, i) => `<div class="bt-step">
         ${i ? '<span class="bt-arrow">→</span>' : ''}
-        <select class="${step.dim ? 'on' : ''}" data-chain-dim="${i}">${chainDimOptions(step.dim)}</select>
-        <select class="${step.dim && step.value && step.value !== 'all' ? 'on' : ''}" data-chain-val="${i}">${chainValueOptions(step.dim, step.value)}</select>
+        <select class="${step.dim ? 'on' : ''}" data-chain-dim="${i}" title="Sequence dimension to match before this game">${chainDimOptions(step.dim)}</select>
+        <select class="${step.dim && step.value && step.value !== 'all' ? 'on' : ''}" data-chain-val="${i}" title="Value required for the selected sequence dimension">${chainValueOptions(step.dim, step.value)}</select>
         <button type="button" class="btn-del" data-chain-del="${i}" title="Remove step">×</button>
       </div>`).join('')}
       <div class="hist-actions">
@@ -1752,6 +2127,16 @@
     else app.innerHTML = weekView();
 
     app.onclick = async (e) => {
+      const detailsBtn = e.target.closest('[data-details]');
+      if (detailsBtn) {
+        const id = detailsBtn.dataset.details;
+        const games = ((state.week || state.bootstrap) && (state.week || state.bootstrap).games) || [];
+        const game = games.find((g) => g.game_id === id);
+        const open = game ? cardExpanded(game) : true;
+        cardOpen.set(id, !open);
+        render();
+        return;
+      }
       const chip = e.target.closest('[data-filter]');
       if (chip) {
         const key = chip.dataset.filter;
@@ -1874,6 +2259,15 @@
       };
     }
     app.onchange = (e) => {
+      const weekSel = e.target.closest('[data-week-select]');
+      if (weekSel) {
+        state.selectedWeek = Number(weekSel.value);
+        state.week = null;
+        cardOpen.clear();
+        persistWeek();
+        load().catch(showPageError);
+        return;
+      }
       const dimSel = e.target.closest('[data-chain-dim]');
       if (dimSel) {
         const i = Number(dimSel.dataset.chainDim);
@@ -1894,6 +2288,10 @@
         reloadBacktest();
       }
     };
+  }
+
+  if (state.page === 'history' || state.page === 'backtest' || state.page === 'week') {
+    syncLocationHash(state.page);
   }
 
   (async () => {

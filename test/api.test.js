@@ -232,6 +232,17 @@ test('/api/history supports filter query params', async () => {
   assert.match(script, /slot-wed/);
   assert.match(script, /slot-sat/);
   assert.match(script, /abbrev-key/);
+  assert.match(script, /W-L-T/);
+  assert.match(script, /win–loss-tie/);
+  assert.match(script, /cover\/fail\/push/);
+  assert.match(script, /over\/under\/push/);
+  assert.match(script, /data-details/);
+  assert.match(script, /Moved lines only/);
+  assert.match(script, /Time of Day/);
+  assert.match(script, /data-week-select/);
+  assert.match(script, /vs-strip/);
+  assert.match(script, /nav-toggle/);
+  assert.match(page, /id="nav-toggle"/);
   assert.match(script, /card-foot/);
   assert.match(script, /Win % Rest/);
   assert.match(script, /statRow\(\s*'Record'/);
@@ -296,6 +307,9 @@ test('/api/history supports filter query params', async () => {
   assert.match(cssText, /\.picks \{ display: grid; gap: 4px; margin-top: auto; \}/);
   assert.doesNotMatch(cssText, /font-size: 72px/);
   assert.match(cssText, /\.week-cards \.pick button \{ font-size: 16px; padding: 8px 10px; \}/);
+  assert.match(cssText, /repeat\(3, minmax\(0, 1fr\)\)/);
+  assert.match(cssText, /\.settle-strip \{/);
+  assert.match(cssText, /body\.menu-open \.auth-slot/);
   assert.match(cssText, /\.pick-stack \.pick-abbr, \.pick-stack \.pick-line \{ font-size: inherit; \}/);
   assert.match(cssText, /\.score-row \{/);
   assert.match(cssText, /background: #d8d8d8/);

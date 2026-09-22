@@ -2,7 +2,7 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { kickoffSlot, formatKickoffEst } = require('../src/kickoff-slot');
+const { kickoffSlot, formatKickoffEst, timeOfDayBucket } = require('../src/kickoff-slot');
 
 test('Wednesday and Saturday kickoffs have their own shade slots', () => {
   assert.equal(kickoffSlot({ kickoff: '2026-09-16T20:15:00-04:00', weekday: 'Wednesday' }), 'slot-wed');
@@ -33,4 +33,14 @@ test('formatKickoffEst uses New York wall time with a literal EST suffix', () =>
   assert.equal(formatKickoffEst('2024-09-08T17:00:00Z'), '2024-09-08 13:00 EST');
   assert.equal(formatKickoffEst('2024-12-08T18:00:00Z'), '2024-12-08 13:00 EST');
   assert.equal(formatKickoffEst('not-a-date'), '');
+});
+
+test('time of day buckets use America/New_York kickoff windows', () => {
+  assert.equal(timeOfDayBucket({ kickoff: '2026-09-13T14:59:00Z' }), 'morning');
+  assert.equal(timeOfDayBucket({ kickoff: '2026-09-13T15:00:00Z' }), 'early');
+  assert.equal(timeOfDayBucket({ kickoff: '2026-09-13T19:59:00Z' }), 'early');
+  assert.equal(timeOfDayBucket({ kickoff: '2026-09-13T20:00:00Z' }), 'afternoon');
+  assert.equal(timeOfDayBucket({ kickoff: '2026-09-13T22:59:00Z' }), 'afternoon');
+  assert.equal(timeOfDayBucket({ kickoff: '2026-09-14T00:00:00Z' }), 'primetime');
+  assert.equal(timeOfDayBucket({ kickoff: 'nope' }), 'unknown');
 });

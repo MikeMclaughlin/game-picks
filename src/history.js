@@ -3,6 +3,7 @@
 const { roadTravel, distanceBucket, sameDivision, tzIndex } = require('./teams');
 const { toNumber, scoresReady, atsLetter } = require('./grader');
 const { resultLetter, formatLine } = require('./week-view');
+const { timeOfDayBucket } = require('./kickoff-slot');
 
 const DEFAULT_FROM = 2016;
 const DEFAULT_TO = 2026;
@@ -18,7 +19,10 @@ const FILTER_DEFAULTS = {
   roof: 'all',
   role: 'all',
   division: 'all',
-  daysOff: 'all'
+  daysOff: 'all',
+  spread: 'all',
+  total: 'all',
+  timeOfDay: 'all'
 };
 
 const NOTES = {
@@ -35,14 +39,34 @@ const NOTES = {
   daysOff: 'Uses home_rest/away_rest: short ≤5 days, bye+ ≥11, else normal.',
   gameDate: 'Kickoff calendar date (gameday, else kickoff in ET).',
   opponent: 'Team-relative opponent when a team is selected; otherwise the AWAY @ HOME matchup.',
-  spread: 'Team-relative signed spread when a team is selected; otherwise home-favored line.',
+  spread: 'Team-relative signed spread when a team is selected; otherwise home-favored line. Filter buckets from |spread_line|: pick = 0, small ≤3, medium ≤6.5, large 7+.',
   restDays: 'Team rest when a team is selected; otherwise away / home rest.',
-  favorite: 'Straight-up wins-losses when the team is a favorite (pick’em excluded).',
-  dog: 'Straight-up wins-losses when the team is an underdog (pick’em excluded).',
+  favorite: 'Straight-up wins–losses–ties when the team is a favorite (pick’em excluded).',
+  dog: 'Straight-up wins–losses–ties when the team is an underdog (pick’em excluded).',
   distance: 'Timezone-based distance traveled by the road team (or the selected team).',
   cover: 'Spread cover (C), fail (F), or push (P). Team-relative when a team is selected.',
-  divisional: 'Y if both clubs share the current static NFL division map.'
+  divisional: 'Y if both clubs share the current static NFL division map.',
+  total: 'Total bucket: low <42, mid 42–47.5, high ≥48.',
+  timeOfDay: 'Kickoff in America/New_York: morning before 11:00, early 11:00 until 16:00, afternoon 16:00 until 19:00, primetime 19:00 and later.'
 };
+
+function spreadAbsBucket(game) {
+  const s = toNumber(game.spread_line);
+  if (s == null) return 'unknown';
+  const abs = Math.abs(s);
+  if (abs === 0) return 'pick';
+  if (abs <= 3) return 'small';
+  if (abs <= 6.5) return 'medium';
+  return 'large';
+}
+
+function totalBucket(game) {
+  const t = toNumber(game.total_line);
+  if (t == null) return 'unknown';
+  if (t < 42) return 'low';
+  if (t < 48) return 'mid';
+  return 'high';
+}
 
 function isByeBefore(games, team, kickoff) {
   const t = team;
@@ -371,6 +395,33 @@ function parseHistoryFilters(searchParams, extras = {}) {
       'bye+': 'bye',
       'bye-plus': 'bye',
       bye_plus: 'bye'
+    }, 'all'),
+    spread: alias(get('spread'), {
+      all: 'all',
+      pick: 'pick',
+      pickem: 'pick',
+      "pick'em": 'pick',
+      'pick-em': 'pick',
+      small: 'small',
+      medium: 'medium',
+      large: 'large'
+    }, 'all'),
+    total: alias(get('total'), {
+      all: 'all',
+      low: 'low',
+      mid: 'mid',
+      medium: 'mid',
+      high: 'high'
+    }, 'all'),
+    timeOfDay: alias(get('timeOfDay') || get('time') || get('tod'), {
+      all: 'all',
+      morning: 'morning',
+      early: 'early',
+      afternoon: 'afternoon',
+      primetime: 'primetime',
+      prime: 'primetime',
+      'prime-time': 'primetime',
+      primetime_: 'primetime'
     }, 'all')
   };
 }
@@ -402,6 +453,9 @@ function matchesGlobalFilters(game, filters) {
     if (filters.division === 'divisional' && !divisional) return false;
     if (filters.division === 'non-div' && divisional) return false;
   }
+  if (filters.spread && filters.spread !== 'all' && spreadAbsBucket(game) !== filters.spread) return false;
+  if (filters.total && filters.total !== 'all' && totalBucket(game) !== filters.total) return false;
+  if (filters.timeOfDay && filters.timeOfDay !== 'all' && timeOfDayBucket(game) !== filters.timeOfDay) return false;
   return true;
 }
 
@@ -553,7 +607,10 @@ function historyPayload(games, filters) {
       cover: true,
       divisional: true,
       favorite: true,
-      dog: true
+      dog: true,
+      spread: true,
+      total: true,
+      timeOfDay: true
     }
   };
 }
@@ -575,5 +632,7 @@ module.exports = {
   gameLogRow,
   weatherLabel,
   FILTER_DEFAULTS,
-  NOTES
+  NOTES,
+  spreadAbsBucket,
+  totalBucket
 };

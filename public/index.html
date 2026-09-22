@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Game Picks</title>
   <link rel="icon" href="/favicon.ico">
-  <link rel="stylesheet" href="/styles.css?v=build-8">
+  <link rel="stylesheet" href="/styles.css?v=build-9">
 </head>
 <body>
   <header class="top">
@@ -22,6 +22,10 @@
       <button type="button" data-page="history" title="Multi-year team splits">History</button>
       <button type="button" data-page="backtest" title="Query historical patterns and Markov-style sequences">Backtest</button>
     </nav>
+    <button type="button" id="nav-toggle" class="nav-toggle" aria-expanded="false" aria-controls="auth-slot" title="Open the account menu">
+      <span class="nav-toggle-bars" aria-hidden="true"></span>
+      <span class="sr">Menu</span>
+    </button>
     <div id="auth-slot" class="auth-slot">
       <p id="auth-notice" class="auth-notice" hidden>Auth not configured</p>
       <div id="clerk-signed-out" class="clerk-signed-out" hidden>
@@ -37,7 +41,7 @@
   </header>
   <p id="db-banner" class="db-banner" hidden></p>
   <main id="app"></main>
-  <footer class="site-foot" id="build-foot">Game Picks · build 8</footer>
-  <script src="/app.js?v=build-8"></script>
+  <footer class="site-foot" id="build-foot">Game Picks · build 9</footer>
+  <script src="/app.js?v=build-9"></script>
 </body>
 </html>

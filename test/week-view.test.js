@@ -2,7 +2,7 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { impliedPoints, projectGame, formatAtsPick, currentSeasonWeek, enrichGame, lastGameInfo, showRestDays, showRestWinPct, restAmountWinPct, lastFiveOutright, lastFiveAts, aiConfidence, expectedCallLabel, aiPick, seasonRecord, formatRecord } = require('../src/week-view');
+const { impliedPoints, projectGame, projectGameFromRates, applyGameToRates, formatAtsPick, currentSeasonWeek, enrichGame, lastGameInfo, showRestDays, showRestWinPct, restAmountWinPct, lastFiveOutright, lastFiveAts, aiConfidence, expectedCallLabel, aiPick, seasonRecord, formatRecord, settleStrip, weekVersus, cardPhase, defaultExpanded } = require('../src/week-view');
 const { resetCalibration } = require('../src/calibration');
 const { roadTravel, teamCity } = require('../src/teams');
 const { UPSERT_SQL } = require('../src/nfl-data');
@@ -204,7 +204,7 @@ test('enrichGame exposes lastGame, city, short rest, and xPts from the line', ()
   assert.equal(card.totalMove.moved, false);
 });
 
-test('last-5 streaks are oldest-to-newest and skip ties/pushes', () => {
+test('last-5 streaks are oldest-to-newest and keep ties and pushes', () => {
   const team = 'SEA';
   const before = '2026-10-20T17:00:00Z';
   function g(id, kickoff, home, away, hs, as, spread) {
@@ -220,15 +220,15 @@ test('last-5 streaks are oldest-to-newest and skip ties/pushes', () => {
   }
   const history = [
     g('1', '2026-09-07T17:00:00Z', 'SEA', 'SF', 24, 17, 3),   // SEA W, C (margin 7 > 3)
-    g('2', '2026-09-14T17:00:00Z', 'ARI', 'SEA', 20, 20, 0),   // tie omitted outright; ATS P omitted
+    g('2', '2026-09-14T17:00:00Z', 'ARI', 'SEA', 20, 20, 0),   // tie and spread push, older than the last five
     g('3', '2026-09-21T17:00:00Z', 'SEA', 'NE', 13, 16, 6),    // SEA L, F (margin -3 < 6 away covers)
     g('4', '2026-09-28T17:00:00Z', 'GB', 'SEA', 10, 27, 3),    // SEA W, C (margin -17 < 3 away covers)
-    g('5', '2026-10-05T17:00:00Z', 'SEA', 'DET', 21, 20, 1),   // SEA W, P omitted ATS
+    g('5', '2026-10-05T17:00:00Z', 'SEA', 'DET', 21, 20, 1),   // SEA W, ATS push
     g('6', '2026-10-12T17:00:00Z', 'LAR', 'SEA', 30, 10, -3),  // SEA L, F (margin 20, spread -3 home LAR favored? wait spread -3 means away favored. margin 20 > -3 home covers, SEA F)
     g('7', '2026-10-19T17:00:00Z', 'SEA', 'KC', 28, 14, 4)     // SEA W, C
   ];
   assert.equal(lastFiveOutright(history, team, before), 'L-W-W-L-W');
-  assert.equal(lastFiveAts(history, team, before), 'C-F-C-F-C');
+  assert.equal(lastFiveAts(history, team, before), 'F-C-P-F-C');
   const later = enrichGame({
     game_id: 'now',
     season: 2026,
@@ -246,7 +246,7 @@ test('last-5 streaks are oldest-to-newest and skip ties/pushes', () => {
     away_score: null
   }, history);
   assert.equal(later.home.lastFive, 'L-W-W-L-W');
-  assert.equal(later.home.lastFiveAts, 'C-F-C-F-C');
+  assert.equal(later.home.lastFiveAts, 'F-C-P-F-C');
   assert.equal(later.home.showRest, false);
   assert.equal(later.away.showRest, true);
 });
@@ -404,4 +404,209 @@ test('expected call label and confidence stay in documented bounds', () => {
   assert.equal(typeof pick.confidence, 'number');
   assert.ok(pick.rawConfidence >= 51 && pick.rawConfidence <= 92);
   assert.ok(pick.confidence >= 1 && pick.confidence <= 99);
+});
+
+test('equal scoring rates pick the home side once home field is included', () => {
+  const history = [];
+  for (let i = 0; i < 2; i += 1) {
+    history.push({
+      game_id: `b${i}`,
+      season: 2024,
+      game_type: 'REG',
+      kickoff: `2024-09-0${i + 1}T17:00:00Z`,
+      home_team: 'BUF',
+      away_team: 'NE',
+      home_score: 24,
+      away_score: 24,
+      location: 'Home'
+    });
+    history.push({
+      game_id: `m${i}`,
+      season: 2024,
+      game_type: 'REG',
+      kickoff: `2024-09-0${i + 1}T20:00:00Z`,
+      home_team: 'MIA',
+      away_team: 'NYJ',
+      home_score: 24,
+      away_score: 24,
+      location: 'Home'
+    });
+  }
+  const game = {
+    home_team: 'BUF',
+    away_team: 'MIA',
+    spread_line: 0,
+    total_line: 44,
+    kickoff: '2024-09-15T17:00:00Z',
+    home_rest: 7,
+    away_rest: 7
+  };
+  const proj = projectGame(game, history);
+  let homeFor = 0;
+  let homeN = 0;
+  let awayFor = 0;
+  let awayN = 0;
+  for (const g of history) {
+    if (g.home_team === 'BUF' || g.away_team === 'BUF') {
+      homeFor += g.home_team === 'BUF' ? g.home_score : g.away_score;
+      homeN += 1;
+    }
+    if (g.home_team === 'MIA' || g.away_team === 'MIA') {
+      awayFor += g.home_team === 'MIA' ? g.home_score : g.away_score;
+      awayN += 1;
+    }
+  }
+  const naiveMargin = ((homeFor / homeN) + (24)) / 2 - ((awayFor / awayN) + (24)) / 2;
+  const naiveTeam = naiveMargin > game.spread_line ? 'BUF' : 'MIA';
+  assert.equal(naiveTeam, 'MIA');
+  assert.equal(proj.atsTeam, 'BUF');
+  assert.notEqual(proj.atsTeam, naiveTeam);
+});
+
+test('recent scoring slump can flip the total off the career rate', () => {
+  const history = [];
+  for (let i = 0; i < 8; i += 1) {
+    history.push({
+      game_id: `hot${i}`,
+      season: 2023,
+      game_type: 'REG',
+      kickoff: `2023-10-${String(i + 1).padStart(2, '0')}T17:00:00Z`,
+      home_team: 'BUF',
+      away_team: 'NE',
+      home_score: 31,
+      away_score: 17,
+      location: 'Home'
+    });
+    history.push({
+      game_id: `mia${i}`,
+      season: 2023,
+      game_type: 'REG',
+      kickoff: `2023-10-${String(i + 1).padStart(2, '0')}T20:00:00Z`,
+      home_team: 'MIA',
+      away_team: 'NYJ',
+      home_score: 31,
+      away_score: 17,
+      location: 'Home'
+    });
+  }
+  for (let i = 0; i < 6; i += 1) {
+    history.push({
+      game_id: `cold${i}`,
+      season: 2024,
+      game_type: 'REG',
+      kickoff: `2024-11-${String(i + 1).padStart(2, '0')}T17:00:00Z`,
+      home_team: 'BUF',
+      away_team: 'NE',
+      home_score: 10,
+      away_score: 10,
+      location: 'Home'
+    });
+    history.push({
+      game_id: `mcold${i}`,
+      season: 2024,
+      game_type: 'REG',
+      kickoff: `2024-11-${String(i + 1).padStart(2, '0')}T20:00:00Z`,
+      home_team: 'MIA',
+      away_team: 'NYJ',
+      home_score: 10,
+      away_score: 10,
+      location: 'Home'
+    });
+  }
+  const game = {
+    home_team: 'BUF',
+    away_team: 'MIA',
+    spread_line: 3,
+    total_line: 51,
+    kickoff: '2024-12-01T18:00:00Z',
+    home_rest: 7,
+    away_rest: 7
+  };
+  const proj = projectGame(game, history);
+  const rates = new Map();
+  const ordered = history.slice().sort((a, b) => Date.parse(a.kickoff) - Date.parse(b.kickoff));
+  for (const g of ordered) applyGameToRates(rates, g);
+  const fromRates = projectGameFromRates(game, rates.get('BUF'), rates.get('MIA'));
+  assert.equal(fromRates.atsTeam, proj.atsTeam);
+  assert.equal(fromRates.ou, proj.ou);
+  assert.equal(proj.ou, 'under');
+  assert.ok(proj.projTotal < 51);
+});
+
+test('settle strip reports cover and under against the closing line', () => {
+  const strip = settleStrip({
+    home_team: 'HOU',
+    away_team: 'TB',
+    home_score: 19,
+    away_score: 20,
+    spread_line: 2.5,
+    total_line: 42.5
+  });
+  assert.equal(strip.text, 'TB covered +2.5 score was UNDER 42.5');
+  const miss = settleStrip({
+    home_team: 'HOU',
+    away_team: 'TB',
+    home_score: 21,
+    away_score: 20,
+    spread_line: 2.5,
+    total_line: 42.5
+  });
+  assert.equal(miss.coverText, 'HOU did NOT cover 2.5');
+  assert.match(miss.totalText, /UNDER/);
+  const push = settleStrip({
+    home_team: 'HOU',
+    away_team: 'TB',
+    home_score: 22,
+    away_score: 20,
+    spread_line: 2,
+    total_line: 42
+  });
+  assert.match(push.text, /push/);
+  assert.match(push.text, /PUSH 42/);
+});
+
+test('final cards collapse by default and live cards stay open', () => {
+  const finalGame = { home_score: 20, away_score: 17, locked: true };
+  const liveGame = { locked: true, live: { state: 'in', home_score: 7, away_score: 3 } };
+  const openGame = { locked: false, home_score: null, away_score: null };
+  assert.equal(cardPhase(finalGame), 'final');
+  assert.equal(defaultExpanded(finalGame), false);
+  assert.equal(cardPhase(liveGame), 'live');
+  assert.equal(defaultExpanded(liveGame), true);
+  assert.equal(cardPhase(openGame), 'pre');
+  assert.equal(defaultExpanded(openGame), true);
+});
+
+test('week versus counts pushes in W-L-T and skips a signed-out user record', () => {
+  const cards = [{
+    home_team: 'HOU',
+    away_team: 'TB',
+    home_score: 20,
+    away_score: 17,
+    spread_line: 2.5,
+    total_line: 36.5,
+    aiPick: { atsTeam: 'HOU', ou: 'over' },
+    wagers: [
+      { market: 'ats', selection: 'TB', result: 'push' },
+      { market: 'ou', selection: 'under', result: 'loss' },
+      { market: 'outright', selection: 'HOU', result: 'win' }
+    ]
+  }];
+  const signedOut = weekVersus(cards, { signedIn: false });
+  assert.equal(signedOut.user, null);
+  assert.equal(signedOut.ai.ats.label, '1-0');
+  const signedIn = weekVersus(cards, { signedIn: true });
+  assert.equal(signedIn.user.ats.label, '0-0-1');
+  assert.equal(signedIn.user.ou.label, '0-1');
+  assert.equal(signedIn.user.outright.label, '1-0');
+  assert.equal(signedIn.ai.ou.label, '1-0');
+});
+
+test('last five keeps ties and spread pushes in the string', () => {
+  const history = [
+    { home_team: 'SEA', away_team: 'ARI', home_score: 10, away_score: 20, spread_line: 3, kickoff: '2024-09-08T17:00:00Z' },
+    { home_team: 'SEA', away_team: 'ARI', home_score: 17, away_score: 17, spread_line: 0, kickoff: '2024-09-15T17:00:00Z' }
+  ];
+  assert.equal(lastFiveOutright(history, 'SEA', '2024-09-22T17:00:00Z'), 'L-T');
+  assert.equal(lastFiveAts(history, 'SEA', '2024-09-22T17:00:00Z'), 'F-P');
 });
