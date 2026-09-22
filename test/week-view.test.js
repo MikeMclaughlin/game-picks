@@ -2,7 +2,7 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { impliedPoints, projectGame, projectGameFromRates, applyGameToRates, formatAtsPick, currentSeasonWeek, enrichGame, lastGameInfo, showRestDays, showRestWinPct, restAmountWinPct, lastFiveOutright, lastFiveAts, aiConfidence, expectedCallLabel, aiPick, seasonRecord, formatRecord, settleStrip, weekVersus, cardPhase, defaultExpanded } = require('../src/week-view');
+const { impliedPoints, projectGame, projectGameFromRates, applyGameToRates, formatAtsPick, currentSeasonWeek, enrichGame, lastGameInfo, showRestDays, showRestWinPct, restAmountWinPct, lastFiveOutright, lastFiveAts, aiConfidence, expectedCallLabel, aiPick, seasonRecord, formatRecord, settleStrip, favoriteAtsTone, compareWeekGames, weekVersus, cardPhase, defaultExpanded } = require('../src/week-view');
 const { resetCalibration } = require('../src/calibration');
 const { roadTravel, teamCity } = require('../src/teams');
 const { UPSERT_SQL } = require('../src/nfl-data');
@@ -543,6 +543,8 @@ test('settle strip reports cover and under against the closing line', () => {
     total_line: 42.5
   });
   assert.equal(strip.text, 'TB covered +2.5 score was UNDER 42.5');
+  assert.equal(strip.atsTone, 'fail');
+  assert.equal(strip.ouTone, 'neutral');
   const miss = settleStrip({
     home_team: 'HOU',
     away_team: 'TB',
@@ -552,7 +554,17 @@ test('settle strip reports cover and under against the closing line', () => {
     total_line: 42.5
   });
   assert.equal(miss.coverText, 'HOU did NOT cover 2.5');
+  assert.equal(miss.atsTone, 'fail');
   assert.match(miss.totalText, /UNDER/);
+  const favCover = settleStrip({
+    home_team: 'HOU',
+    away_team: 'TB',
+    home_score: 24,
+    away_score: 20,
+    spread_line: 2.5,
+    total_line: 42.5
+  });
+  assert.equal(favCover.atsTone, 'cover');
   const push = settleStrip({
     home_team: 'HOU',
     away_team: 'TB',
@@ -563,6 +575,28 @@ test('settle strip reports cover and under against the closing line', () => {
   });
   assert.match(push.text, /push/);
   assert.match(push.text, /PUSH 42/);
+  assert.equal(push.atsTone, 'push');
+});
+
+test('favorite ATS tone follows closing favorite cover', () => {
+  const scores = { home: 27, away: 20 };
+  assert.equal(favoriteAtsTone({ spread_line: 3 }, scores), 'cover');
+  assert.equal(favoriteAtsTone({ spread_line: 10 }, scores), 'fail');
+  assert.equal(favoriteAtsTone({ spread_line: -3 }, scores), 'fail');
+  assert.equal(favoriteAtsTone({ spread_line: -10 }, { home: 16, away: 27 }), 'cover');
+  assert.equal(favoriteAtsTone({ spread_line: 7 }, scores), 'push');
+  assert.equal(favoriteAtsTone({ spread_line: 0 }, { home: 21, away: 17 }), 'neutral');
+});
+
+test('week cards sort by kickoff then home team', () => {
+  const slate = [
+    { kickoff: '2026-09-13T17:00:00Z', home_team: 'SEA', away_team: 'SF' },
+    { kickoff: '2026-09-13T17:00:00Z', home_team: 'BUF', away_team: 'MIA' },
+    { kickoff: '2026-09-14T00:20:00Z', home_team: 'KC', away_team: 'BAL' },
+    { kickoff: '2026-09-13T13:00:00Z', home_team: 'DAL', away_team: 'NYG' }
+  ];
+  const ordered = slate.slice().sort(compareWeekGames);
+  assert.deepEqual(ordered.map((g) => g.home_team), ['DAL', 'BUF', 'SEA', 'KC']);
 });
 
 test('final cards collapse by default and live cards stay open', () => {

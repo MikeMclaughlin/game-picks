@@ -68,6 +68,8 @@ CLI `grade-all` and `GET`/`POST` `/api/grade-all` share the same grader. Import 
 
 Home (Current Week) cards show a live score row under the team names while a game is in progress, and after kickoff when ESPN has a final. Away and home scores sit on the sides; quarter + clock (or `Final`) is centered. The Home page polls `GET /api/live-scores` every 5 minutes **only while any current-week game is in progress**. The server never calls ESPN during idle hours/weeks (`espn live: skip idle`). Set `ESPN_LIVE=0` to disable the ESPN client. Manual refresh: `GET /api/cron/live-scores` (same admin gate as the nflverse cron).
 
+The week picker loads any regular-season week in the current season via `GET /api/week?season=&week=`, including **upcoming weeks for advance picks**. Locks are per-game at kickoff (not “current week only”). If a future week is missing from the DB, Home shows an empty-week notice — run `npm run import` (or the scores cron) so that week’s schedule/lines exist, then pick normally on unlocked games.
+
 AI picks shown on Current Week cards are upserted into `ai_picks` (keyed by `game_id` / season / week). Query later with `GET /api/ai-picks?season=2026&week=2`.
 
 OUTRIGHT and ATS are mutually exclusive on the same game (O/U may coexist with either). Saving one market clears the other for that user/game. If both rows already exist from before this rule, the next save of either market deletes the partner.

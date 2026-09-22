@@ -766,14 +766,14 @@
     document.body.classList.remove('menu-open');
     if (navToggle) {
       navToggle.setAttribute('aria-expanded', 'false');
-      navToggle.title = 'Open the account menu';
+      navToggle.title = 'Open menu';
     }
   }
   function toggleMenu() {
     const open = document.body.classList.toggle('menu-open');
     if (navToggle) {
       navToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
-      navToggle.title = open ? 'Close the account menu' : 'Open the account menu';
+      navToggle.title = open ? 'Close menu' : 'Open menu';
     }
   }
   if (navToggle) {
@@ -784,7 +784,7 @@
   }
   document.addEventListener('click', (e) => {
     if (!document.body.classList.contains('menu-open')) return;
-    if (e.target.closest('#auth-slot') || e.target.closest('#nav-toggle')) return;
+    if (e.target.closest('#site-nav') || e.target.closest('#nav-toggle')) return;
     closeMenu();
   });
 
@@ -840,9 +840,11 @@
         hint: 'Browse the week now. Sign-in and saved picks wait on DATABASE_URL (Neon on Vercel).'
       });
     }
-    render();
+    // Avoid painting bootstrap (often the finished current week) while the selected week reloads.
+    const pendingWeek = state.page === 'week' && !state.week;
+    if (!pendingWeek) render();
     try {
-      if (state.page === 'week' && !state.week) {
+      if (pendingWeek) {
         const weekNum = state.selectedWeek || state.bootstrap.week;
         const week = await api(`/api/week?season=${state.bootstrap.season}&week=${weekNum}`);
         if (gen !== loadGen) return;
@@ -1190,11 +1192,18 @@
     return null;
   }
 
-  function settleText(game) {
-    if (cardPhase(game) !== 'final') return '';
+  function settleParts(game) {
+    if (cardPhase(game) !== 'final') return null;
+    if (game.settle && (game.settle.coverText || game.settle.totalText || game.settle.text)) {
+      return {
+        coverText: game.settle.coverText || '',
+        totalText: game.settle.totalText || '',
+        atsTone: game.settle.atsTone || 'neutral',
+        text: game.settle.text || ''
+      };
+    }
     const scores = finalScorePair(game);
-    if (!scores && game.settle && game.settle.text) return game.settle.text;
-    if (!scores) return game.settle && game.settle.text ? game.settle.text : '';
+    if (!scores) return null;
     const home = scores.home;
     const away = scores.away;
     const spread = numOrNull(game.spread_line);
@@ -1227,7 +1236,33 @@
       else if (sum > total) totalText = `score was OVER ${shown}`;
       else totalText = `score was UNDER ${shown}`;
     }
-    return [coverText, totalText].filter(Boolean).join(' ');
+    let atsTone = 'neutral';
+    if (coverText && spread != null) {
+      const margin = home - away;
+      if (close(margin, spread)) atsTone = 'push';
+      else if (!close(spread, 0)) {
+        const homeFavored = spread > 0;
+        const homeCovered = margin > spread;
+        atsTone = (homeFavored ? homeCovered : !homeCovered) ? 'cover' : 'fail';
+      }
+    }
+    const text = [coverText, totalText].filter(Boolean).join(' ');
+    if (!text) return null;
+    return { coverText, totalText, atsTone, text };
+  }
+
+  function settleHtml(game) {
+    const parts = settleParts(game);
+    if (!parts) return '';
+    const bits = [];
+    if (parts.coverText) {
+      bits.push(`<span class="settle-ats ${esc(parts.atsTone || 'neutral')}">${esc(parts.coverText)}</span>`);
+    }
+    if (parts.totalText) {
+      bits.push(`<span class="settle-ou">${esc(parts.totalText)}</span>`);
+    }
+    if (!bits.length) return '';
+    return `<div class="settle-strip" title="Closing spread and total: ATS colored by whether the favorite covered (green/red); O/U stays neutral">${bits.join(' ')}</div>`;
   }
 
   function scoreRow(game) {
@@ -1325,7 +1360,6 @@
     const slot = kickoffSlotClass(game);
     const phase = cardPhase(game);
     const expanded = cardExpanded(game);
-    const settled = phase === 'final' ? settleText(game) : '';
     return `<article class="card matchup${game.locked ? ' locked' : ''}${expanded ? '' : ' is-collapsed'}${slot ? ` ${esc(slot)}` : ''}">
       <div class="card-head">
         <span class="kick">${esc(kickoffLabel(game))}</span>
@@ -1343,7 +1377,7 @@
         </div>
       </div>
       ${scoreRow(game)}
-      ${settled ? `<div class="settle-strip" title="Closing spread and total: whether the winner covered, and over, under, or push">${esc(settled)}</div>` : ''}
+      ${phase === 'final' ? settleHtml(game) : ''}
       <button type="button" class="details-toggle" data-details="${esc(game.game_id)}" title="Show or hide team stats, the AI pick, and pick buttons">${expanded ? '▲ HIDE' : '▼ DETAILS'}</button>
       <div class="card-details"${expanded ? '' : ' hidden'}>
         ${cardStatRows(game)}
@@ -1493,8 +1527,8 @@
         method: 'POST',
         body: JSON.stringify({ game_id: gid, market, selection: nextSel })
       });
+      // Keep bootstrap; only refetch the selected week so open cards never flash collapsed.
       state.week = null;
-      state.bootstrap = null;
       state.standings = null;
       await load();
     } catch (err) {
@@ -1518,13 +1552,24 @@
     const current = w && w.week;
     const season = (w && w.season) || (state.bootstrap && state.bootstrap.season) || '';
     const opts = weeks.map((n) => `<option value="${n}"${Number(n) === Number(current) ? ' selected' : ''}>Week ${n}</option>`).join('');
-    return `<label class="week-pick">Week <select data-week-select title="Choose a week of the ${esc(season)} season, including completed weeks">${opts}</select></label>`;
+    return `<label class="week-pick">Week <select data-week-select title="Choose any ${esc(season)} week — including upcoming weeks for advance picks before kickoff">${opts}</select></label>`;
+  }
+
+  function compareWeekCards(a, b) {
+    const ka = Date.parse(a && a.kickoff) || 0;
+    const kb = Date.parse(b && b.kickoff) || 0;
+    if (ka !== kb) return ka - kb;
+    return String((a && a.home_team) || '').localeCompare(String((b && b.home_team) || ''));
   }
 
   function weekView() {
     const w = state.week || state.bootstrap;
-    const games = (w.games || []).filter(passFilters);
-    const strip = myWeekStrip(w.games || []);
+    const all = [...(w.games || [])].sort(compareWeekCards);
+    const games = all.filter(passFilters);
+    const strip = myWeekStrip(all);
+    const emptyMsg = all.length
+      ? '<p>No games match those filters.</p>'
+      : `<p class="notice">No games scheduled for week ${esc(w.week)} yet. Import schedule/lines for that week (npm run import / cron) so advance picks can load here.</p>`;
     return `<section class="week-page">
       <div class="week-hero">
         <div class="week-pill">WEEK ${esc(w.week)}</div>
@@ -1534,7 +1579,7 @@
         <div>This week <strong>${fmtInt(strip.week)}</strong></div>
         <div>Locks at kickoff <strong>${fmtInt(strip.locks)}</strong></div>
       </div>
-      ${versusStrip(w.games || [])}
+      ${versusStrip(all)}
       ${abbrevKey()}
       <div class="filters">
         ${weekPicker(w)}
@@ -1543,7 +1588,7 @@
         <button type="button" class="chip${state.filters.projUnder ? ' on' : ''}" data-filter="projUnder" title="Show games projected under the total">Projected under</button>
         <button type="button" class="chip${state.filters.movedLines ? ' on' : ''}" data-filter="movedLines" title="Show only games whose spread or total has moved from the opening line">Moved lines only</button>
       </div>
-      <div class="cards week-cards" id="week-cards">${games.map(card).join('') || '<p>No games match those filters.</p>'}</div>
+      <div class="cards week-cards" id="week-cards">${games.map(card).join('') || emptyMsg}</div>
     </section>`;
   }
 
@@ -1887,16 +1932,18 @@
     const joint = recPct(exp.joint);
     const brierRaw = exp.brierRaw != null ? Number(exp.brierRaw).toFixed(4) : '—';
     const brierCal = exp.brierCalibrated != null ? Number(exp.brierCalibrated).toFixed(4) : '—';
+    const brierTitle = 'Brier score: mean squared error of predicted ATS win probability vs the actual 0/1 outcome (0 = perfect, 1 = worst). Lower is better.';
     return `<div class="hist-block">
       <h2>Expected call accuracy</h2>
       <p class="bt-note">Same AI Pick sides as Current Week, written as <b>BUF -5.5 and Over</b>. Confidence is a calibrated historical ATS hit rate (2016+ scored REG), not the raw 51–92 rule and not a joint ATS+OU probability. ATS and OU are graded separately; joint requires both correct (a push on either side is a push).</p>
+      <p class="bt-note">Brier measures how close the confidence probability was to the real ATS result — think average squared miss. Raw uses the pre-calibration confidence; calibrated uses the isotonic map. Closer to 0 is better.</p>
       <div class="bt-stats">
         <div class="bt-stat"><div class="k">Avg confidence</div><div class="v">${exp.confidenceAvg != null ? `${esc(exp.confidenceAvg)}%` : '—'}</div></div>
         <div class="bt-stat"><div class="k">ATS hit</div><div class="v">${esc(ats.pct)}</div><div class="s">${esc(ats.label)}</div></div>
         <div class="bt-stat"><div class="k">OU hit</div><div class="v">${esc(ou.pct)}</div><div class="s">${esc(ou.label)}</div></div>
         <div class="bt-stat"><div class="k">Joint ATS+OU</div><div class="v">${esc(joint.pct)}</div><div class="s">${esc(joint.label)}</div></div>
-        <div class="bt-stat"><div class="k">Brier raw</div><div class="v">${esc(brierRaw)}</div><div class="s">ATS, lower better</div></div>
-        <div class="bt-stat"><div class="k">Brier calibrated</div><div class="v">${esc(brierCal)}</div><div class="s">ATS, lower better</div></div>
+        <div class="bt-stat" title="${esc(brierTitle)}"><div class="k" title="${esc(brierTitle)}">Brier raw</div><div class="v">${esc(brierRaw)}</div><div class="s">ATS · lower better</div></div>
+        <div class="bt-stat" title="${esc(brierTitle)}"><div class="k" title="${esc(brierTitle)}">Brier calibrated</div><div class="v">${esc(brierCal)}</div><div class="s">ATS · lower better</div></div>
       </div>
     </div>`;
   }

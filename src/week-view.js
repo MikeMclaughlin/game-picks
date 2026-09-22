@@ -562,6 +562,22 @@ function defaultExpanded(game) {
   return cardPhase(game) !== 'final';
 }
 
+/**
+ * ATS color tone by whether the closing favorite covered.
+ * Positive spread_line = home favored. Pick'ems and pushes stay neutral.
+ */
+function favoriteAtsTone(game, scores) {
+  const spread = toNumber(game.spread_line);
+  if (spread == null || !scores) return null;
+  const margin = scores.home - scores.away;
+  if (nearlyEqual(margin, spread)) return 'push';
+  if (nearlyEqual(spread, 0)) return 'neutral';
+  const homeFavored = spread > 0;
+  const homeCovered = margin > spread;
+  const favCovered = homeFavored ? homeCovered : !homeCovered;
+  return favCovered ? 'cover' : 'fail';
+}
+
 /** Closing-line settle copy for a final. Null until both scores are in. */
 function settleStrip(game) {
   const scores = finalScores(game);
@@ -602,7 +618,21 @@ function settleStrip(game) {
   }
   const text = [coverText, totalText].filter(Boolean).join(' ');
   if (!text) return null;
-  return { coverText, totalText, text };
+  return {
+    coverText,
+    totalText,
+    text,
+    atsTone: coverText ? favoriteAtsTone(game, scores) || 'neutral' : null,
+    ouTone: totalText ? 'neutral' : null
+  };
+}
+
+/** Kickoff ascending, then home team abbr alphabetical (stable slate order). */
+function compareWeekGames(a, b) {
+  const ka = Date.parse(a && a.kickoff) || 0;
+  const kb = Date.parse(b && b.kickoff) || 0;
+  if (ka !== kb) return ka - kb;
+  return String((a && a.home_team) || '').localeCompare(String((b && b.home_team) || ''));
 }
 
 function tallyResults(list) {
@@ -836,6 +866,8 @@ module.exports = {
   applyGameToRates,
   aiPick,
   settleStrip,
+  favoriteAtsTone,
+  compareWeekGames,
   cardPhase,
   defaultExpanded,
   finalScores,
