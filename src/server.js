@@ -24,7 +24,7 @@ const {
 } = require('./clerk-auth');
 const { validatePick, gradeAll, isLocked, exclusivePartner, assertExclusivePicks } = require('./grader');
 const { importGames, loadSeedGames, loadSchedule2026, defaultSeasons } = require('./nfl-data');
-const { enrichGame, currentSeasonWeek, annotateCard, weekVersus } = require('./week-view');
+const { enrichGame, currentSeasonWeek, annotateCard, weekVersus, compareWeekGames } = require('./week-view');
 const { fitCalibrationFromGames } = require('./calibration');
 const { parseHistoryFilters, historyPayload } = require('./history');
 const { parseBacktestFilters, parseChain, backtestPayload, backtestCsv } = require('./backtest');
@@ -398,7 +398,7 @@ async function handleApi(req, res, url) {
     const games = await allGames(sql);
     const { season, week } = currentSeasonWeek(games);
     const weekGames = games.filter((g) => g.season === season && g.week === week && g.game_type === 'REG')
-      .sort((a, b) => Date.parse(a.kickoff) - Date.parse(b.kickoff));
+      .sort(compareWeekGames);
     const wagers = user ? await userWagers(sql, user.id, weekGames.map((g) => g.game_id)) : [];
     const byGame = groupWagers(wagers);
     const history = historyWindow(games, season);
@@ -458,7 +458,7 @@ async function handleApi(req, res, url) {
     const week = Number(url.searchParams.get('week') || cursor.week);
     const weekGames = (await gamesForWeek(sql, season, week))
       .filter((g) => g.game_type !== 'PRE')
-      .sort((a, b) => Date.parse(a.kickoff) - Date.parse(b.kickoff));
+      .sort(compareWeekGames);
     const user = await currentUser(sql, req);
     const wagers = user ? await userWagers(sql, user.id, weekGames.map((g) => g.game_id)) : [];
     const history = historyWindow(games, season);

@@ -273,6 +273,13 @@ test('/api/history supports filter query params', async () => {
   assert.doesNotMatch(script, /not a model probability/);
   assert.match(script, /Brier raw/);
   assert.match(script, /Brier calibrated/);
+  assert.match(script, /Brier measures how close the confidence probability/);
+  assert.match(script, /pendingWeek/);
+  assert.match(script, /function settleHtml/);
+  assert.match(script, /settle-ats/);
+  assert.match(script, /compareWeekCards/);
+  assert.match(script, /advance picks/);
+  assert.match(script, /Keep bootstrap/);
   assert.match(script, /Days rest/);
   assert.match(script, /key: 'favorite'/);
   assert.match(script, /key: 'dog'/);
@@ -309,7 +316,12 @@ test('/api/history supports filter query params', async () => {
   assert.match(cssText, /\.week-cards \.pick button \{ font-size: 16px; padding: 8px 10px; \}/);
   assert.match(cssText, /repeat\(3, minmax\(0, 1fr\)\)/);
   assert.match(cssText, /\.settle-strip \{/);
-  assert.match(cssText, /body\.menu-open \.auth-slot/);
+  assert.match(cssText, /\.settle-strip \.settle-ats\.cover/);
+  assert.match(cssText, /\.settle-strip \.settle-ou/);
+  assert.match(cssText, /body\.menu-open \.site-nav/);
+  assert.match(cssText, /\.site-nav \{/);
+  assert.match(page, /id="site-nav"/);
+  assert.match(page, /aria-controls="site-nav"/);
   assert.match(cssText, /\.pick-stack \.pick-abbr, \.pick-stack \.pick-line \{ font-size: inherit; \}/);
   assert.match(cssText, /\.score-row \{/);
   assert.match(cssText, /background: #d8d8d8/);

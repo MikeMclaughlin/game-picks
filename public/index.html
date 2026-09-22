@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Game Picks</title>
   <link rel="icon" href="/favicon.ico">
-  <link rel="stylesheet" href="/styles.css?v=build-9">
+  <link rel="stylesheet" href="/styles.css?v=build-10">
 </head>
 <body>
   <header class="top">
@@ -16,32 +16,34 @@
         <div class="sub">Season pick-em · outright / ATS / O/U</div>
       </div>
     </div>
-    <nav class="tabs" id="tabs">
-      <button type="button" data-page="week" class="on" title="Make and edit wagers for the current week">Home</button>
-      <button type="button" data-page="standings" title="Season standings">Standings</button>
-      <button type="button" data-page="history" title="Multi-year team splits">History</button>
-      <button type="button" data-page="backtest" title="Query historical patterns and Markov-style sequences">Backtest</button>
-    </nav>
-    <button type="button" id="nav-toggle" class="nav-toggle" aria-expanded="false" aria-controls="auth-slot" title="Open the account menu">
+    <button type="button" id="nav-toggle" class="nav-toggle" aria-expanded="false" aria-controls="site-nav" title="Open menu">
       <span class="nav-toggle-bars" aria-hidden="true"></span>
       <span class="sr">Menu</span>
     </button>
-    <div id="auth-slot" class="auth-slot">
-      <p id="auth-notice" class="auth-notice" hidden>Auth not configured</p>
-      <div id="clerk-signed-out" class="clerk-signed-out" hidden>
-        <span class="auth-label">Social Media sign in</span>
-        <button type="button" data-oauth="oauth_google" title="Sign in with Google">Google</button>
-        <button type="button" data-oauth="oauth_x" title="Sign in with X">X</button>
-        <button type="button" id="btn-sign-in" title="Sign in with Google or X">Sign in</button>
-        <button type="button" id="btn-sign-up" title="Create an account">Sign up</button>
+    <div id="site-nav" class="site-nav">
+      <nav class="tabs" id="tabs">
+        <button type="button" data-page="week" class="on" title="Make and edit wagers for any unlocked week">Home</button>
+        <button type="button" data-page="standings" title="Season standings">Standings</button>
+        <button type="button" data-page="history" title="Multi-year team splits">History</button>
+        <button type="button" data-page="backtest" title="Query historical patterns and Markov-style sequences">Backtest</button>
+      </nav>
+      <div id="auth-slot" class="auth-slot">
+        <p id="auth-notice" class="auth-notice" hidden>Auth not configured</p>
+        <div id="clerk-signed-out" class="clerk-signed-out" hidden>
+          <span class="auth-label">Social Media sign in</span>
+          <button type="button" data-oauth="oauth_google" title="Sign in with Google">Google</button>
+          <button type="button" data-oauth="oauth_x" title="Sign in with X">X</button>
+          <button type="button" id="btn-sign-in" title="Sign in with Google or X">Sign in</button>
+          <button type="button" id="btn-sign-up" title="Create an account">Sign up</button>
+        </div>
+        <div id="clerk-user-button" class="clerk-user-button" hidden></div>
+        <span id="who" class="who"></span>
       </div>
-      <div id="clerk-user-button" class="clerk-user-button" hidden></div>
-      <span id="who" class="who"></span>
     </div>
   </header>
   <p id="db-banner" class="db-banner" hidden></p>
   <main id="app"></main>
-  <footer class="site-foot" id="build-foot">Game Picks · build 9</footer>
-  <script src="/app.js?v=build-9"></script>
+  <footer class="site-foot" id="build-foot">Game Picks · build 10</footer>
+  <script src="/app.js?v=build-10"></script>
 </body>
 </html>

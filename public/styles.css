@@ -31,6 +31,14 @@ button, input, select { font: inherit; color: inherit; }
   background: var(--gold); color: #111; font-weight: 800; border-radius: 4px; letter-spacing: -0.04em;
 }
 .brand .sub { color: var(--muted); font-size: 11px; }
+.site-nav {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex: 1;
+  flex-wrap: wrap;
+  min-width: 0;
+}
 .tabs { display: flex; gap: 2px; flex: 1; flex-wrap: wrap; align-items: stretch; }
 .tabs button {
   background: transparent; border: none; border-bottom: 2px solid transparent;
@@ -144,14 +152,22 @@ h1, h2 { margin: 0 0 8px; font-size: 22px; font-weight: 700; letter-spacing: 0.0
 .card-details[hidden] { display: none; }
 .settle-strip {
   background: #141414;
-  border: 1px solid #2f6b45;
-  color: var(--green);
+  border: 1px solid var(--line);
   border-radius: 4px;
   padding: 4px 8px;
   font-size: 12px;
   font-weight: 700;
   line-height: 1.3;
+  color: var(--muted);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 0.35em;
 }
+.settle-strip .settle-ats.cover { color: var(--green); }
+.settle-strip .settle-ats.fail { color: var(--red); }
+.settle-strip .settle-ats.push,
+.settle-strip .settle-ats.neutral { color: var(--muted); }
+.settle-strip .settle-ou { color: var(--muted); }
 .details-toggle {
   width: 100%;
   background: transparent;
@@ -419,16 +435,16 @@ th .caret { color: var(--gold); font-size: 10px; margin-left: 4px; }
   .city { font-size: 18px; }
   .nav-toggle { display: inline-flex; }
   .top { position: sticky; }
-  .auth-slot {
+  .site-nav {
     display: none;
     position: absolute;
     top: calc(100% + 1px);
     right: 8px;
     left: 8px;
-    margin-left: 0;
-    width: auto;
+    flex: none;
     flex-direction: column;
     align-items: stretch;
+    gap: 10px;
     background: #111;
     border: 1px solid var(--line);
     border-radius: 6px;
@@ -436,7 +452,32 @@ th .caret { color: var(--gold); font-size: 10px; margin-left: 4px; }
     z-index: 6;
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
   }
-  body.menu-open .auth-slot { display: flex; }
+  body.menu-open .site-nav { display: flex; }
+  .site-nav .tabs {
+    flex: none;
+    flex-direction: column;
+    width: 100%;
+    gap: 4px;
+  }
+  .site-nav .tabs button {
+    width: 100%;
+    text-align: left;
+    border: 1px solid var(--line);
+    border-bottom-color: var(--line);
+    border-radius: 4px;
+    padding: 10px 12px;
+  }
+  .site-nav .tabs button.on {
+    border-color: var(--gold);
+    color: var(--gold);
+  }
+  .auth-slot {
+    margin-left: 0;
+    width: 100%;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: flex-start;
+  }
   .clerk-signed-out { flex-direction: column; align-items: stretch; }
   .auth-slot button, .clerk-signed-out button { width: 100%; }
 }
