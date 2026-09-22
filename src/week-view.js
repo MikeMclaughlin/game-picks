@@ -1,7 +1,7 @@
 'use strict';
 
 const { roadTravel, teamAbbr, teamCity } = require('./teams');
-const { toNumber, scoresReady, isLocked, atsLetter } = require('./grader');
+const { toNumber, scoresReady, isLocked, atsLetter, gradeAts, gradeOu, gradeWager } = require('./grader');
 const { kickoffSlot } = require('./kickoff-slot');
 const { displayConfidence, getActiveMap } = require('./calibration');
 
@@ -183,7 +183,7 @@ function lastFiveLetters(history, team, beforeKickoff, letterFn) {
   const games = priorScoredGames(history, team, beforeKickoff);
   for (let i = games.length - 1; i >= 0 && letters.length < 5; i -= 1) {
     const letter = letterFn(games[i], teamAbbr(team));
-    if (!letter || letter === 'T' || letter === 'P') continue;
+    if (!letter) continue;
     letters.push(letter);
   }
   if (!letters.length) return null;
@@ -275,6 +275,169 @@ function restDays(game, side) {
   return side === 'home' ? toNumber(game.home_rest) : toNumber(game.away_rest);
 }
 
+const RECENT_KEEP = 6;
+const LEAGUE_PPG = 22;
+const RATE_PRIOR_GAMES = 4;
+const HFA_MARGIN = 2.5;
+const SHORT_REST_PENALTY = 1.5;
+const BYE_BOOST = 0.75;
+const SITE_MIN = 4;
+
+function blankRate() {
+  return {
+    for: 0,
+    against: 0,
+    n: 0,
+    homeFor: 0,
+    homeAgainst: 0,
+    homeN: 0,
+    awayFor: 0,
+    awayAgainst: 0,
+    awayN: 0,
+    recent: []
+  };
+}
+
+function shrunkMean(sum, n, priorMean, priorN) {
+  const nn = Number(n) || 0;
+  return ((Number(sum) || 0) + priorMean * priorN) / (nn + priorN);
+}
+
+function restPoints(days) {
+  const n = toNumber(days);
+  if (n == null) return 0;
+  if (n <= SHORT_REST_DAYS) return -SHORT_REST_PENALTY;
+  if (n >= 11) return BYE_BOOST;
+  return 0;
+}
+
+function travelPenalty(game) {
+  const travel = roadTravel(game.away_team, game.home_team);
+  if (!travel || travel.zones < 2) return 0;
+  let pen = 0.5 * (travel.zones - 1);
+  if (travel.dir === 'east') pen += 0.5;
+  return pen;
+}
+
+function blendRecent(career, values) {
+  if (!values || values.length < 3) return career;
+  const recent = values.reduce((sum, v) => sum + v, 0) / values.length;
+  const w = Math.min(0.6, 0.2 + values.length * 0.06);
+  return career * (1 - w) + recent * w;
+}
+
+function offenseDefense(profile, site) {
+  const careerOff = shrunkMean(profile.for, profile.n, LEAGUE_PPG, RATE_PRIOR_GAMES);
+  const careerDef = shrunkMean(profile.against, profile.n, LEAGUE_PPG, RATE_PRIOR_GAMES);
+  const recent = profile.recent || [];
+  let off = blendRecent(careerOff, recent.map((g) => g.scored));
+  let def = blendRecent(careerDef, recent.map((g) => g.allowed));
+  const siteN = site === 'home' ? Number(profile.homeN) || 0 : Number(profile.awayN) || 0;
+  const siteFor = site === 'home' ? Number(profile.homeFor) || 0 : Number(profile.awayFor) || 0;
+  const siteAg = site === 'home' ? Number(profile.homeAgainst) || 0 : Number(profile.awayAgainst) || 0;
+  if (siteN >= SITE_MIN) {
+    off = off * 0.45 + (siteFor / siteN) * 0.55;
+    def = def * 0.45 + (siteAg / siteN) * 0.55;
+  }
+  return { off, def, siteN };
+}
+
+/**
+ * Points projection used by Home AI Pick and Backtest expected calls.
+ * Career points are shrunk toward a 22 ppg prior, then blended with the last
+ * six games. Home/away splits replace a flat home-field bump once each side
+ * has four games at that site; otherwise the home margin gets +2.5. Short
+ * rest, bye weeks, and 2+ zone road trips adjust the matchup after that.
+ * Only games before kickoff count (missing kickoff uses the whole history).
+ */
+function projectFromProfiles(game, home, away) {
+  const h = offenseDefense(home, 'home');
+  const a = offenseDefense(away, 'away');
+  let projHome = (h.off + a.def) / 2;
+  let projAway = (a.off + h.def) / 2;
+  const siteReady = h.siteN >= SITE_MIN && a.siteN >= SITE_MIN;
+  if (!siteReady) {
+    projHome += HFA_MARGIN / 2;
+    projAway -= HFA_MARGIN / 2;
+  }
+  projHome += restPoints(game.home_rest);
+  projAway += restPoints(game.away_rest);
+  projAway -= travelPenalty(game);
+  const projTotal = projHome + projAway;
+  const projMargin = projHome - projAway;
+  const total = toNumber(game.total_line);
+  const spread = toNumber(game.spread_line);
+  let ou = null;
+  if (total != null) ou = projTotal > total ? 'over' : 'under';
+  let atsTeam = null;
+  if (spread != null) atsTeam = projMargin > spread ? game.home_team : game.away_team;
+  return {
+    hasHistory: true,
+    projHome,
+    projAway,
+    projTotal,
+    projMargin,
+    sampleN: Math.min(home.n, away.n),
+    fadeHighTotal: false,
+    ou,
+    atsTeam,
+    siteAdjusted: siteReady
+  };
+}
+
+function addGameToProfile(profile, scored, allowed, site) {
+  profile.for += scored;
+  profile.against += allowed;
+  profile.n += 1;
+  if (site === 'home') {
+    profile.homeFor += scored;
+    profile.homeAgainst += allowed;
+    profile.homeN += 1;
+  } else {
+    profile.awayFor += scored;
+    profile.awayAgainst += allowed;
+    profile.awayN += 1;
+  }
+  profile.recent.push({ scored, allowed });
+  if (profile.recent.length > RECENT_KEEP) {
+    profile.recent.splice(0, profile.recent.length - RECENT_KEEP);
+  }
+}
+
+function profileFromHistory(history, team, beforeKickoff) {
+  const before = Date.parse(beforeKickoff);
+  let games;
+  if (Number.isFinite(before)) games = priorScoredGames(history, team, beforeKickoff);
+  else {
+    games = teamGames(history, team).slice().sort((a, b) => Date.parse(a.kickoff) - Date.parse(b.kickoff));
+  }
+  if (!games.length) return null;
+  const profile = blankRate();
+  const t = teamAbbr(team);
+  for (const g of games) {
+    const home = g.home_team === t;
+    const scored = home ? toNumber(g.home_score) : toNumber(g.away_score);
+    const allowed = home ? toNumber(g.away_score) : toNumber(g.home_score);
+    if (scored == null || allowed == null) continue;
+    addGameToProfile(profile, scored, allowed, home ? 'home' : 'away');
+  }
+  return profile.n ? profile : null;
+}
+
+function applyGameToRates(rates, game) {
+  const hs = toNumber(game.home_score);
+  const as = toNumber(game.away_score);
+  if (hs == null || as == null) return;
+  for (const [team, scored, allowed, site] of [
+    [game.home_team, hs, as, 'home'],
+    [game.away_team, as, hs, 'away']
+  ]) {
+    const cur = rates.get(team) || blankRate();
+    addGameToProfile(cur, scored, allowed, site);
+    rates.set(team, cur);
+  }
+}
+
 function scoringRates(history, team) {
   const games = teamGames(history, team);
   if (!games.length) return null;
@@ -334,8 +497,8 @@ function aiConfidence(game, projection) {
 }
 
 function projectGame(game, history) {
-  const home = scoringRates(history, game.home_team);
-  const away = scoringRates(history, game.away_team);
+  const home = profileFromHistory(history, game.home_team, game.kickoff);
+  const away = profileFromHistory(history, game.away_team, game.kickoff);
   if (!home || !away) {
     const total = toNumber(game.total_line);
     return {
@@ -348,53 +511,171 @@ function projectGame(game, history) {
       ou: total != null && total >= 46 ? 'under' : total != null ? 'over' : null
     };
   }
-  const projHome = (home.for + away.against) / 2;
-  const projAway = (away.for + home.against) / 2;
-  const projTotal = projHome + projAway;
-  const projMargin = projHome - projAway;
-  const total = toNumber(game.total_line);
-  const spread = toNumber(game.spread_line);
-  let ou = null;
-  if (total != null) ou = projTotal > total ? 'over' : 'under';
-  let atsTeam = null;
-  if (spread != null) atsTeam = projMargin > spread ? game.home_team : game.away_team;
-  return {
-    hasHistory: true,
-    projHome,
-    projAway,
-    projTotal,
-    projMargin,
-    sampleN: Math.min(home.n, away.n),
-    fadeHighTotal: false,
-    ou,
-    atsTeam
-  };
+  return projectFromProfiles(game, home, away);
 }
 
 function projectGameFromRates(game, home, away) {
   if (!home || !away || !home.n || !away.n) {
     return projectGame(game, []);
   }
-  const projHome = (home.for / home.n + away.against / away.n) / 2;
-  const projAway = (away.for / away.n + home.against / home.n) / 2;
-  const projTotal = projHome + projAway;
-  const projMargin = projHome - projAway;
-  const total = toNumber(game.total_line);
+  const h = { ...blankRate(), ...home, recent: home.recent || [] };
+  const a = { ...blankRate(), ...away, recent: away.recent || [] };
+  return projectFromProfiles(game, h, a);
+}
+
+function nearlyEqual(a, b) {
+  return Math.abs(Number(a) - Number(b)) < 0.001;
+}
+
+function signedLineText(line) {
+  const shown = formatLine(line);
+  if (shown == null) return null;
+  return Number(line) > 0 ? `+${shown}` : shown;
+}
+
+function finalScores(game) {
+  const live = game && game.live;
+  const state = live ? String(live.state || '').toLowerCase() : '';
+  if (state === 'in') return null;
+  const hs = toNumber(game && game.home_score);
+  const as = toNumber(game && game.away_score);
+  if (hs != null && as != null) return { home: hs, away: as };
+  if (live && (state === 'post' || live.completed)) {
+    const lh = toNumber(live.home_score);
+    const la = toNumber(live.away_score);
+    if (lh != null && la != null) return { home: lh, away: la };
+  }
+  return null;
+}
+
+function cardPhase(game) {
+  const live = game && game.live;
+  const state = live ? String(live.state || '').toLowerCase() : '';
+  if (state === 'in') return 'live';
+  if (finalScores(game)) return 'final';
+  if (state === 'post' || (live && live.completed)) return 'final';
+  if (game && game.locked) return 'live';
+  return 'pre';
+}
+
+function defaultExpanded(game) {
+  return cardPhase(game) !== 'final';
+}
+
+/** Closing-line settle copy for a final. Null until both scores are in. */
+function settleStrip(game) {
+  const scores = finalScores(game);
+  if (!scores) return null;
+  const home = scores.home;
+  const away = scores.away;
   const spread = toNumber(game.spread_line);
-  let ou = null;
-  if (total != null) ou = projTotal > total ? 'over' : 'under';
-  let atsTeam = null;
-  if (spread != null) atsTeam = projMargin > spread ? game.home_team : game.away_team;
+  const total = toNumber(game.total_line);
+  let coverText = null;
+  if (spread != null) {
+    const margin = home - away;
+    if (nearlyEqual(home, away)) {
+      if (nearlyEqual(margin, spread)) coverText = 'SU tie · spread PUSH';
+      else {
+        const coverTeam = margin > spread ? game.home_team : game.away_team;
+        const line = coverTeam === game.home_team ? -spread : spread;
+        coverText = `SU tie · ${coverTeam} covered ${signedLineText(line)}`;
+      }
+    } else {
+      const winner = home > away ? game.home_team : game.away_team;
+      const winnerLine = winner === game.home_team ? -spread : spread;
+      if (nearlyEqual(margin, spread)) {
+        coverText = `${winner} push ${signedLineText(winnerLine)}`;
+      } else if ((margin > spread ? game.home_team : game.away_team) === winner) {
+        coverText = `${winner} covered ${signedLineText(winnerLine)}`;
+      } else {
+        coverText = `${winner} did NOT cover ${formatLine(Math.abs(spread))}`;
+      }
+    }
+  }
+  let totalText = null;
+  if (total != null) {
+    const sum = home + away;
+    const shown = formatLine(total);
+    if (nearlyEqual(sum, total)) totalText = `score was PUSH ${shown}`;
+    else if (sum > total) totalText = `score was OVER ${shown}`;
+    else totalText = `score was UNDER ${shown}`;
+  }
+  const text = [coverText, totalText].filter(Boolean).join(' ');
+  if (!text) return null;
+  return { coverText, totalText, text };
+}
+
+function tallyResults(list) {
+  let wins = 0;
+  let losses = 0;
+  let ties = 0;
+  for (const r of list) {
+    if (r === 'win' || r === 'W') wins += 1;
+    else if (r === 'loss' || r === 'L') losses += 1;
+    else if (r === 'push' || r === 'P' || r === 'T') ties += 1;
+  }
   return {
-    hasHistory: true,
-    projHome,
-    projAway,
-    projTotal,
-    projMargin,
-    sampleN: Math.min(home.n, away.n),
-    fadeHighTotal: false,
-    ou,
-    atsTeam
+    wins,
+    losses,
+    ties,
+    graded: wins + losses + ties,
+    label: ties ? `${wins}-${losses}-${ties}` : `${wins}-${losses}`
+  };
+}
+
+function weekVersus(cards, options = {}) {
+  const signedIn = Boolean(options.signedIn);
+  const aiAts = [];
+  const aiOu = [];
+  const userAts = [];
+  const userOu = [];
+  const userOut = [];
+  for (const card of cards || []) {
+    const scores = finalScores(card);
+    if (!scores) continue;
+    const game = { ...card, home_score: scores.home, away_score: scores.away };
+    const ai = card.aiPick || {};
+    if (ai.atsTeam) {
+      const graded = gradeAts(game, ai.atsTeam);
+      if (graded.result !== 'ungraded') aiAts.push(graded.result);
+    }
+    if (ai.ou) {
+      const graded = gradeOu(game, ai.ou);
+      if (graded.result !== 'ungraded') aiOu.push(graded.result);
+    }
+    if (!signedIn) continue;
+    for (const w of card.wagers || []) {
+      if (!w || !w.market || w.selection == null || w.selection === '') continue;
+      let result = w.result;
+      if (!result || result === 'ungraded') {
+        try {
+          result = gradeWager(game, w.market, w.selection).result;
+        } catch {
+          result = null;
+        }
+      }
+      if (!result || result === 'ungraded') continue;
+      if (w.market === 'ats') userAts.push(result);
+      else if (w.market === 'ou') userOu.push(result);
+      else if (w.market === 'outright') userOut.push(result);
+    }
+  }
+  return {
+    signedIn,
+    ai: { ats: tallyResults(aiAts), ou: tallyResults(aiOu) },
+    user: signedIn ? {
+      ats: tallyResults(userAts),
+      ou: tallyResults(userOu),
+      outright: tallyResults(userOut)
+    } : null
+  };
+}
+
+function annotateCard(card) {
+  return {
+    ...card,
+    phase: cardPhase(card),
+    settle: settleStrip(card)
   };
 }
 
@@ -552,7 +833,15 @@ module.exports = {
   scoringRates,
   projectGame,
   projectGameFromRates,
+  applyGameToRates,
   aiPick,
+  settleStrip,
+  cardPhase,
+  defaultExpanded,
+  finalScores,
+  weekVersus,
+  annotateCard,
+  tallyResults,
   aiConfidence,
   expectedCallLabel,
   enrichGame,

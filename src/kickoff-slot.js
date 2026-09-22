@@ -81,4 +81,22 @@ function kickoffSlot(game) {
   return 'slot-sun-1';
 }
 
-module.exports = { kickoffSlot, etParts, formatKickoffEst };
+/**
+ * Kickoff window in America/New_York.
+ * morning: before 11:00
+ * early: 11:00 inclusive through before 16:00 (1pm slate)
+ * afternoon: 16:00 inclusive through before 19:00 (4:00–4:15 and other late kicks)
+ * primetime: 19:00 and later
+ */
+function timeOfDayBucket(game) {
+  const iso = typeof game === 'string' ? game : game && (game.kickoff || game);
+  const parts = etParts(iso);
+  if (!parts || parts.hour == null) return 'unknown';
+  const minutes = parts.hour * 60 + (parts.minute || 0);
+  if (minutes < 11 * 60) return 'morning';
+  if (minutes < 16 * 60) return 'early';
+  if (minutes < 19 * 60) return 'afternoon';
+  return 'primetime';
+}
+
+module.exports = { kickoffSlot, etParts, formatKickoffEst, timeOfDayBucket };

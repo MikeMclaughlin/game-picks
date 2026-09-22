@@ -22,15 +22,19 @@ const {
   weatherLabel,
   gameLogRow,
   FILTER_DEFAULTS,
-  NOTES
+  NOTES,
+  spreadAbsBucket,
+  totalBucket
 } = require('./history');
+const { timeOfDayBucket } = require('./kickoff-slot');
 
 const SMALL_N = 30;
 const CSV_GAME_CAP = 8000;
 
 const EXTRA_DEFAULTS = {
   spread: 'all',
-  total: 'all'
+  total: 'all',
+  timeOfDay: 'all'
 };
 
 const CHAIN_DIMS = [
@@ -46,7 +50,8 @@ const CHAIN_DIMS = [
   { dim: 'weather', label: 'Weather', values: ['cold', 'windy', 'fair', 'dome'] },
   { dim: 'roof', label: 'Roof', values: ['dome', 'outdoor', 'retractable'] },
   { dim: 'travel', label: 'Travel', values: ['east', 'west'] },
-  { dim: 'distance', label: 'Distance', values: ['local', 'cross'] }
+  { dim: 'distance', label: 'Distance', values: ['local', 'cross'] },
+  { dim: 'timeOfDay', label: 'Time of day', values: ['morning', 'early', 'afternoon', 'primetime'] }
 ];
 
 const DIM_SET = new Set(CHAIN_DIMS.map((d) => d.dim));
@@ -64,7 +69,15 @@ const VALUE_ALIASES = {
   weather: { cold: 'cold', windy: 'windy', fair: 'fair', dome: 'dome' },
   roof: { dome: 'dome', outdoor: 'outdoor', outdoors: 'outdoor', retractable: 'retractable' },
   travel: { east: 'east', west: 'west' },
-  distance: { local: 'local', cross: 'cross', 'cross-country': 'cross' }
+  distance: { local: 'local', cross: 'cross', 'cross-country': 'cross' },
+  timeOfDay: {
+    morning: 'morning',
+    early: 'early',
+    afternoon: 'afternoon',
+    primetime: 'primetime',
+    prime: 'primetime',
+    'prime-time': 'primetime'
+  }
 };
 
 function aliasValue(dim, raw) {
@@ -130,24 +143,6 @@ function parseChain(input) {
     steps.push({ dim, value: normalized });
   }
   return steps;
-}
-
-function spreadAbsBucket(game) {
-  const s = toNumber(game.spread_line);
-  if (s == null) return 'unknown';
-  const abs = Math.abs(s);
-  if (abs === 0) return 'pick';
-  if (abs <= 3) return 'small';
-  if (abs <= 6.5) return 'medium';
-  return 'large';
-}
-
-function totalBucket(game) {
-  const t = toNumber(game.total_line);
-  if (t == null) return 'unknown';
-  if (t < 42) return 'low';
-  if (t < 48) return 'mid';
-  return 'high';
 }
 
 function streakBucket(pattern) {
@@ -245,6 +240,7 @@ function stateValue(game, team, dim, index) {
     if (game.home_team === team && game.location !== 'Neutral') return 'home';
     return distanceBucket(game.away_team, game.home_team);
   }
+  if (dim === 'timeOfDay') return timeOfDayBucket(game);
   return null;
 }
 
@@ -700,12 +696,13 @@ function backtestPayload(games, options = {}) {
       ...NOTES,
       smallN: `Rates with N < ${SMALL_N} are greyed — treat them as noisy.`,
       confidence: CALIBRATION_NOTE,
-      expected: 'Expected call uses the same scoring-rate projection as Current Week AI Pick (ATS side + Over/Under).',
+      expected: 'Expected call uses the same projection as Current Week AI Pick (recent form, site, rest, travel, and home field — not career scoring rate alone). ATS side + Over/Under.',
       baseline: 'League baseline is all scored games in the selected year range (home perspective when no team is selected). Team baseline is that club’s unfiltered games in the same years.',
       chain: 'Each chain step further restricts games whose pre-game state matches that dimension (last-5 hot = 4–5 W or covers).',
       last5: 'hot = 4–5 wins/covers in the last 5 decided games; cold = 0–1; mixed = 2–3. Patterns shorter than 3 decided games are excluded from those buckets.',
       spread: 'Spread size from |spread_line|: pick = 0, small ≤3, medium ≤6.5, large 7+.',
       total: 'Total bucket: low <42, mid 42–47.5, high ≥48.',
+      timeOfDay: NOTES.timeOfDay,
       opponent: 'Away and home team abbreviations as AWAY @ HOME.',
       restDays: 'Days of rest for the focus team before this game.'
     },

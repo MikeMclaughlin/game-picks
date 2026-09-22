@@ -8,10 +8,11 @@
  * still shown on the card but is not the reliability target.
  *
  * Fit: walk 2016+ scored REG games the same way Backtest expected calls do
- * (prior scoring rates only), take the raw 51–92 rule score, grade the ATS
+ * (prior games only, same projection as Current Week — recent form, site,
+ * rest, travel, and home field), take the raw 51–92 rule score, grade the ATS
  * side, then map raw → empirical hit rate with shrinkage + isotonic (PAVA)
  * so the curve cannot invert. Recalculated from stored games at bootstrap
- * and Backtest — not a hand-tuned table.
+ * and Backtest — not a hand-tuned table. The map does not choose the side.
  */
 
 const { scoresReady, atsLetter, toNumber } = require('./grader');
@@ -181,19 +182,8 @@ function resetCalibration() {
 }
 
 function bumpScoringRates(rates, game) {
-  const hs = toNumber(game.home_score);
-  const as = toNumber(game.away_score);
-  if (hs == null || as == null) return;
-  for (const [team, scored, allowed] of [
-    [game.home_team, hs, as],
-    [game.away_team, as, hs]
-  ]) {
-    const cur = rates.get(team) || { for: 0, against: 0, n: 0 };
-    cur.for += scored;
-    cur.against += allowed;
-    cur.n += 1;
-    rates.set(team, cur);
-  }
+  const { applyGameToRates } = require('./week-view');
+  applyGameToRates(rates, game);
 }
 
 function collectAtsSamples(games) {

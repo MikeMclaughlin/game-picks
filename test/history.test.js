@@ -192,3 +192,38 @@ test('history game log includes date, opponent, spread, rest, weather, distance,
   assert.equal(all.gameRows.length, 2);
   assert.equal(all.gameRows[0].opponent.includes('@'), true);
 });
+
+test('history filters share spread, total, and time-of-day buckets with backtest', () => {
+  const morning = game({
+    game_id: 'am',
+    kickoff: '2024-09-08T13:00:00Z',
+    spread_line: 7,
+    total_line: 41
+  });
+  const early = game({
+    game_id: 'early',
+    kickoff: '2024-09-08T17:00:00Z',
+    spread_line: 3,
+    total_line: 44.5
+  });
+  const prime = game({
+    game_id: 'prime',
+    kickoff: '2024-09-09T00:20:00Z',
+    spread_line: 1,
+    total_line: 51
+  });
+  const filters = parseHistoryFilters({ spread: 'large', total: 'low', timeOfDay: 'morning', from: 2024, to: 2024 });
+  assert.equal(filters.spread, 'large');
+  assert.equal(filters.total, 'low');
+  assert.equal(filters.timeOfDay, 'morning');
+  const payload = historyPayload([morning, early, prime], filters);
+  assert.equal(payload.supported.spread, true);
+  assert.equal(payload.supported.total, true);
+  assert.equal(payload.supported.timeOfDay, true);
+  assert.equal(payload.gameRows.length, 1);
+  assert.equal(payload.gameRows[0].game_id, 'am');
+  const alias = parseHistoryFilters(new URLSearchParams('tod=prime-time&spread=pickem&total=medium'));
+  assert.equal(alias.timeOfDay, 'primetime');
+  assert.equal(alias.spread, 'pick');
+  assert.equal(alias.total, 'mid');
+});

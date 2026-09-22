@@ -24,7 +24,7 @@ const {
 } = require('./clerk-auth');
 const { validatePick, gradeAll, isLocked, exclusivePartner, assertExclusivePicks } = require('./grader');
 const { importGames, loadSeedGames, loadSchedule2026, defaultSeasons } = require('./nfl-data');
-const { enrichGame, currentSeasonWeek } = require('./week-view');
+const { enrichGame, currentSeasonWeek, annotateCard, weekVersus } = require('./week-view');
 const { fitCalibrationFromGames } = require('./calibration');
 const { parseHistoryFilters, historyPayload } = require('./history');
 const { parseBacktestFilters, parseChain, backtestPayload, backtestCsv } = require('./backtest');
@@ -260,6 +260,8 @@ async function standings(sql, poolId, season, week) {
       COALESCE(SUM(wr.points) FILTER (WHERE g.season = ${season} AND g.week = ${week}), 0)::int AS weekly_points,
       COUNT(w.id) FILTER (WHERE g.season = ${season})::int AS wagers,
       COUNT(wr.wager_id) FILTER (WHERE g.season = ${season} AND wr.result = 'win')::int AS wins,
+      COUNT(wr.wager_id) FILTER (WHERE g.season = ${season} AND wr.result = 'loss')::int AS losses,
+      COUNT(wr.wager_id) FILTER (WHERE g.season = ${season} AND wr.result = 'push')::int AS pushes,
       COUNT(wr.wager_id) FILTER (WHERE g.season = ${season} AND wr.result IN ('win','loss','push'))::int AS settled
     FROM users u
     LEFT JOIN wagers w ON w.user_id = u.id
@@ -269,17 +271,40 @@ async function standings(sql, poolId, season, week) {
     GROUP BY u.id, u.username, u.username_norm
     ORDER BY season_points DESC, weekly_points DESC, u.username_norm ASC
   `;
-  return rows.map((r, idx) => ({
-    rank: idx + 1,
-    user_id: r.id,
-    username: r.username,
-    season_points: Number(r.season_points),
-    weekly_points: Number(r.weekly_points),
-    wagers: Number(r.wagers),
-    wins: Number(r.wins),
-    settled: Number(r.settled),
-    win_pct: Number(r.settled) ? Number(r.wins) / Number(r.settled) : null
-  }));
+  return rows.map((r, idx) => {
+    const wins = Number(r.wins);
+    const losses = Number(r.losses);
+    const pushes = Number(r.pushes);
+    const decided = wins + losses;
+    const record = pushes ? `${wins}-${losses}-${pushes}` : `${wins}-${losses}`;
+    return {
+      rank: idx + 1,
+      user_id: r.id,
+      username: r.username,
+      season_points: Number(r.season_points),
+      weekly_points: Number(r.weekly_points),
+      wagers: Number(r.wagers),
+      wins,
+      losses,
+      pushes,
+      record,
+      settled: Number(r.settled),
+      win_pct: decided ? wins / decided : null
+    };
+  });
+}
+
+function weeksForSeason(games, season) {
+  return [...new Set(games.filter((g) => Number(g.season) === Number(season) && g.game_type !== 'PRE').map((g) => g.week))]
+    .sort((a, b) => a - b);
+}
+
+function presentWeek(cards, user) {
+  const games = (cards || []).map(annotateCard);
+  return {
+    games,
+    compare: weekVersus(games, { signedIn: Boolean(user) })
+  };
 }
 
 function groupWagers(list) {
@@ -387,6 +412,7 @@ async function handleApi(req, res, url) {
       }
     }
     const liveAttach = await attachLiveScores(cards, { sql });
+    const presented = presentWeek(liveAttach.cards, user);
     const poolId = user ? user.pool_id : sql ? (await getPool(sql)).id : null;
     const board = poolId ? await standings(sql, poolId, season, week) : [];
     return json(res, 200, {
@@ -399,7 +425,9 @@ async function handleApi(req, res, url) {
       clerk: publicClerkConfig(),
       season,
       week,
-      games: liveAttach.cards,
+      weeks: weeksForSeason(games, season),
+      games: presented.games,
+      compare: presented.compare,
       livePoll: Boolean(liveAttach.live && liveAttach.live.livePoll),
       liveReason: liveAttach.live && liveAttach.live.reason,
       standings: board.slice(0, 8),
@@ -444,16 +472,16 @@ async function handleApi(req, res, url) {
       }
     }
     const liveAttach = await attachLiveScores(cards, { sql });
-    const weeks = [...new Set(games.filter((g) => g.season === season && g.game_type !== 'PRE').map((g) => g.week))].sort(
-      (a, b) => a - b
-    );
+    const presented = presentWeek(liveAttach.cards, user);
+    const weeks = weeksForSeason(games, season);
     return json(res, 200, {
       ok: true,
       db,
       season,
       week,
       weeks,
-      games: liveAttach.cards,
+      games: presented.games,
+      compare: presented.compare,
       livePoll: Boolean(liveAttach.live && liveAttach.live.livePoll),
       liveReason: liveAttach.live && liveAttach.live.reason,
       user: publicUser(user),
