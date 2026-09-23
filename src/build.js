@@ -1,6 +1,6 @@
 'use strict';
 
-/** Footer / health build number. Increment on each master ship. */
-const BUILD = 10;
+/** Footer / health build. Major.minor. Increment on each master ship. */
+const BUILD = '11.0';
 
 module.exports = { BUILD };

@@ -1348,13 +1348,34 @@
     startLivePoll();
   }
 
+  function confidenceBit(value, label, title) {
+    if (value == null || !Number.isFinite(Number(value))) return '';
+    return `<span class="ai-conf" title="${esc(title)}">${esc(label)} ${esc(String(Math.round(Number(value))))}% confidence</span>`;
+  }
+
   function card(game) {
     const pick = game.aiPick || {};
-    const aiRaw = pick.expected
-      || (pick.label ? pick.label.replace(/^AI Pick:\s*/i, '').trim() : '');
-    const conf = pick.confidence != null && Number.isFinite(Number(pick.confidence))
-      ? `<span class="ai-conf" title="Calibrated historical ATS hit rate (2016+ scored REG). The raw edge/sample rule is mapped with isotonic reliability so this % tracks ATS hit rate by confidence bucket — not a joint ATS+OU probability."> · ${esc(String(Math.round(Number(pick.confidence))))}% confidence</span>`
-      : '';
+    const aiRaw = pick.label
+      || pick.expected
+      || '';
+    const atsConf = pick.atsConfidence != null ? pick.atsConfidence : (pick.ats || pick.atsTeam ? pick.confidence : null);
+    const confParts = [
+      confidenceBit(
+        atsConf,
+        'ATS',
+        'Calibrated historical ATS hit rate (2016+ scored REG) for the ATS side only. The raw ATS edge/sample rule is mapped with isotonic reliability. This is not an O/U probability and not a joint ATS+O/U probability.'
+      ),
+      confidenceBit(
+        pick.ou ? pick.ouConfidence : null,
+        'O/U',
+        'O/U confidence: separate edge/sample score for the total only (51–92 rule). Not the ATS hit-rate map and not a joint ATS+O/U probability.'
+      )
+    ].filter(Boolean);
+    const conf = confParts.length ? ` · ${confParts.join(' · ')}` : '';
+    const extraNotes = [];
+    if (pick.ats && pick.atsNote) extraNotes.push(pick.atsNote);
+    if (pick.ou && pick.ouNote) extraNotes.push(pick.ouNote);
+    const noteHtml = extraNotes.length ? `<div class="ai-note">${extraNotes.map((n) => esc(n)).join(' · ')}</div>` : '';
     const awayCity = (game.away && game.away.city) || game.away_team;
     const homeCity = (game.home && game.home.city) || game.home_team;
     const slot = kickoffSlotClass(game);
@@ -1382,7 +1403,7 @@
       <div class="card-details"${expanded ? '' : ' hidden'}>
         ${cardStatRows(game)}
         <div class="card-foot">
-          ${aiRaw ? `<div class="ai"><span>AI Pick:</span> ${esc(aiRaw)}${conf}</div>` : ''}
+          ${aiRaw ? `<div class="ai"><span>AI Pick:</span> ${esc(aiRaw)}${conf}</div>${noteHtml}` : ''}
           <div class="picks">
             ${pickRow(game, 'outright', game.away_team, game.home_team, outrightPickLabel(game.away_team), outrightPickLabel(game.home_team))}
             ${pickRow(game, 'ats', game.away_team, game.home_team, atsPickLabel(game, game.away_team), atsPickLabel(game, game.home_team), {
@@ -1935,10 +1956,11 @@
     const brierTitle = 'Brier score: mean squared error of predicted ATS win probability vs the actual 0/1 outcome (0 = perfect, 1 = worst). Lower is better.';
     return `<div class="hist-block">
       <h2>Expected call accuracy</h2>
-      <p class="bt-note">Same AI Pick sides as Current Week, written as <b>BUF -5.5 and Over</b>. Confidence is a calibrated historical ATS hit rate (2016+ scored REG), not the raw 51–92 rule and not a joint ATS+OU probability. ATS and OU are graded separately; joint requires both correct (a push on either side is a push).</p>
-      <p class="bt-note">Brier measures how close the confidence probability was to the real ATS result — think average squared miss. Raw uses the pre-calibration confidence; calibrated uses the isotonic map. Closer to 0 is better.</p>
+      <p class="bt-note">Same AI Pick sides as Current Week, written as <b>BUF -5.5 and Over</b>. ATS confidence is a calibrated historical ATS hit rate (2016+ scored REG). O/U confidence is a separate total edge/sample score, not a joint ATS+OU probability. ATS and OU are graded separately; joint requires both correct (a push on either side is a push).</p>
+      <p class="bt-note">Brier measures how close the confidence probability was to the real ATS result — think average squared miss. Raw uses the pre-calibration ATS confidence; calibrated uses the isotonic map. Closer to 0 is better.</p>
       <div class="bt-stats">
-        <div class="bt-stat"><div class="k">Avg confidence</div><div class="v">${exp.confidenceAvg != null ? `${esc(exp.confidenceAvg)}%` : '—'}</div></div>
+        <div class="bt-stat"><div class="k">Avg ATS confidence</div><div class="v">${exp.confidenceAvg != null ? `${esc(exp.confidenceAvg)}%` : '—'}</div></div>
+        <div class="bt-stat"><div class="k">Avg O/U confidence</div><div class="v">${exp.ouConfidenceAvg != null ? `${esc(exp.ouConfidenceAvg)}%` : '—'}</div></div>
         <div class="bt-stat"><div class="k">ATS hit</div><div class="v">${esc(ats.pct)}</div><div class="s">${esc(ats.label)}</div></div>
         <div class="bt-stat"><div class="k">OU hit</div><div class="v">${esc(ou.pct)}</div><div class="s">${esc(ou.label)}</div></div>
         <div class="bt-stat"><div class="k">Joint ATS+OU</div><div class="v">${esc(joint.pct)}</div><div class="s">${esc(joint.label)}</div></div>
@@ -1991,8 +2013,9 @@
       { key: 'weatherLabel', label: 'Weather', title: 'Weather / roof conditions' },
       { key: 'coverLabel', label: 'Cover', title: 'Spread cover (C), fail (F), or push (P)' },
       { key: 'ou', label: 'OU', title: 'Over/under result (O, U, or P)' },
-      { key: 'expected', label: 'Expected', title: 'AI expected call (ATS side and Over/Under)' },
-      { key: 'confidence', label: 'Conf %', title: 'Calibrated historical ATS hit rate (isotonic map from the raw edge/sample rule)' },
+      { key: 'expected', label: 'Expected', title: 'AI expected call (ATS or moneyline side, and Over/Under)' },
+      { key: 'confidence', label: 'ATS %', title: 'ATS confidence: calibrated historical ATS hit rate (isotonic map from the ATS-only edge/sample rule)' },
+      { key: 'ouConfidence', label: 'O/U %', title: 'O/U confidence: separate edge/sample score for the total, not the ATS hit-rate map' },
       { key: 'expectedAtsHit', label: 'ATS hit', title: 'Whether the expected ATS call hit (W, L, or P)' },
       { key: 'expectedOuHit', label: 'OU hit', title: 'Whether the expected over/under call hit (W, L, or P)' }
     ];
@@ -2015,6 +2038,7 @@
         <td>${esc(r.ou || '—')}</td>
         <td>${esc(r.expected || '—')}</td>
         <td>${r.confidence != null ? `${esc(r.confidence)}%` : '—'}</td>
+        <td>${r.ouConfidence != null ? `${esc(r.ouConfidence)}%` : '—'}</td>
         <td>${hitCell(r.expectedAtsHit)}</td>
         <td>${hitCell(r.expectedOuHit)}</td>
       </tr>`).join('')}</tbody>
@@ -2024,7 +2048,7 @@
   function downloadBacktestCsv() {
     const rows = (state.backtest && state.backtest.games) || [];
     if (!rows.length) return;
-    const headers = ['date','season','week','away','home','focus','spread','total','away_rest','home_rest','weather','roof','site','division','role','last_game','last5_wl','last5_ats','home_score','away_score','outright','cover','ou','expected','confidence','expected_ats_hit','expected_ou_hit'];
+    const headers = ['date','season','week','away','home','focus','spread','total','away_rest','home_rest','weather','roof','site','division','role','last_game','last5_wl','last5_ats','home_score','away_score','outright','cover','ou','expected','confidence','ou_confidence','expected_ats_hit','expected_ou_hit'];
     const escCsv = (v) => {
       const s = v == null ? '' : String(v);
       return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
@@ -2037,7 +2061,7 @@
         weather: r.weatherLabel, roof: r.roofLabel, site: r.site, division: r.divisionalLabel, role: r.role,
         last_game: r.lastGame, last5_wl: r.last5wl, last5_ats: r.last5ats, home_score: r.home_score, away_score: r.away_score,
         outright: r.outright, cover: r.coverLabel, ou: r.ou, expected: r.expected, confidence: r.confidence,
-        expected_ats_hit: r.expectedAtsHit, expected_ou_hit: r.expectedOuHit
+        ou_confidence: r.ouConfidence, expected_ats_hit: r.expectedAtsHit, expected_ou_hit: r.expectedOuHit
       };
       lines.push(headers.map((h) => escCsv(rec[h])).join(','));
     }

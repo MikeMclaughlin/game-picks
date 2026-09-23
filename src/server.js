@@ -29,7 +29,7 @@ const { fitCalibrationFromGames } = require('./calibration');
 const { parseHistoryFilters, historyPayload } = require('./history');
 const { parseBacktestFilters, parseChain, backtestPayload, backtestCsv } = require('./backtest');
 const { listTeamAbbrs } = require('./teams');
-const { persistAiPicks, listAiPicks } = require('./ai-picks');
+const { persistAiPicks, listAiPicks, applyAiSnapshots } = require('./ai-picks');
 const { historyWindow } = require('./seasons');
 const { BUILD } = require('./build');
 const { attachLiveScores, resolveLiveScores } = require('./espn-live');
@@ -128,12 +128,32 @@ async function seedIfNeeded(sql) {
   }
 }
 
+function stampHtml(html) {
+  return html
+    .replace(/\/styles\.css\?v=build-[^"]+/, `/styles.css?v=build-${BUILD}`)
+    .replace(/\/app\.js\?v=build-[^"]+/, `/app.js?v=build-${BUILD}`)
+    .replace(/Game Picks · build [^<]+/, `Game Picks · build ${BUILD}`);
+}
+
+async function freezeWeekPicks(sql, cards, season, week) {
+  if (!sql) return cards;
+  try {
+    const rows = await listAiPicks(sql, { season, week });
+    const snapped = applyAiSnapshots(cards, rows);
+    await persistAiPicks(sql, snapped);
+    return snapped;
+  } catch (err) {
+    console.error('persist ai picks failed', err);
+    return cards;
+  }
+}
+
 function sendFile(res, filePath) {
   const ext = path.extname(filePath).toLowerCase();
   const type = MIME[ext] || 'application/octet-stream';
   let body = fs.readFileSync(filePath);
   if (ext === '.html') {
-    let html = body.toString('utf8');
+    let html = stampHtml(body.toString('utf8'));
     const cfg = JSON.stringify(publicClerkConfig());
     if (!html.includes('window.__CLERK_CONFIG__')) {
       html = html.replace('</head>', `<script>window.__CLERK_CONFIG__=${cfg};</script>\n</head>`);
@@ -403,14 +423,12 @@ async function handleApi(req, res, url) {
     const byGame = groupWagers(wagers);
     const history = historyWindow(games, season);
     fitCalibrationFromGames(games);
-    const cards = weekGames.map((g) => enrichGame(g, history, byGame));
-    if (sql) {
-      try {
-        await persistAiPicks(sql, cards);
-      } catch (err) {
-        console.error('persist ai picks failed', err);
-      }
-    }
+    const cards = await freezeWeekPicks(
+      sql,
+      weekGames.map((g) => enrichGame(g, history, byGame)),
+      season,
+      week
+    );
     const liveAttach = await attachLiveScores(cards, { sql });
     const presented = presentWeek(liveAttach.cards, user);
     const poolId = user ? user.pool_id : sql ? (await getPool(sql)).id : null;
@@ -463,14 +481,12 @@ async function handleApi(req, res, url) {
     const wagers = user ? await userWagers(sql, user.id, weekGames.map((g) => g.game_id)) : [];
     const history = historyWindow(games, season);
     fitCalibrationFromGames(games);
-    const cards = weekGames.map((g) => enrichGame(g, history, groupWagers(wagers)));
-    if (sql) {
-      try {
-        await persistAiPicks(sql, cards);
-      } catch (err) {
-        console.error('persist ai picks failed', err);
-      }
-    }
+    const cards = await freezeWeekPicks(
+      sql,
+      weekGames.map((g) => enrichGame(g, history, groupWagers(wagers))),
+      season,
+      week
+    );
     const liveAttach = await attachLiveScores(cards, { sql });
     const presented = presentWeek(liveAttach.cards, user);
     const weeks = weeksForSeason(games, season);

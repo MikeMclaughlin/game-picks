@@ -14,13 +14,15 @@ const {
   fitCalibrationFromGames,
   PRIOR_STRENGTH
 } = require('../src/calibration');
-const { aiConfidence, aiPick, projectGame } = require('../src/week-view');
+const { aiConfidence, ouConfidenceRaw, aiPick, projectGame } = require('../src/week-view');
 const { loadSeedGames } = require('../src/nfl-data');
 
 test('aiConfidence raw rule stays in 51–92', () => {
   resetCalibration();
-  assert.equal(aiConfidence({ total_line: 46 }, { hasHistory: false, fadeHighTotal: true }), 54);
+  assert.equal(ouConfidenceRaw({ total_line: 46 }, { hasHistory: false, fadeHighTotal: true }), 54);
+  assert.equal(aiConfidence({ total_line: 46 }, { hasHistory: false, fadeHighTotal: true }), 52);
   assert.equal(aiConfidence({ total_line: 40 }, { hasHistory: false, fadeHighTotal: false }), 52);
+  assert.equal(ouConfidenceRaw({ total_line: 40 }, { hasHistory: false, fadeHighTotal: false }), 52);
   const high = aiConfidence(
     { spread_line: 3, total_line: 44 },
     { hasHistory: true, projMargin: 10, projTotal: 52, sampleN: 80 }

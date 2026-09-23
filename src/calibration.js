@@ -9,13 +9,15 @@
  *
  * Fit: walk 2016+ scored REG games the same way Backtest expected calls do
  * (prior games only, same projection as Current Week — recent form, site,
- * rest, travel, and home field), take the raw 51–92 rule score, grade the ATS
- * side, then map raw → empirical hit rate with shrinkage + isotonic (PAVA)
- * so the curve cannot invert. Recalculated from stored games at bootstrap
- * and Backtest — not a hand-tuned table. The map does not choose the side.
+ * rest, travel, and home field), take the raw ATS-only 51–92 rule score,
+ * grade the published ATS side, then map raw → empirical hit rate with
+ * shrinkage + isotonic (PAVA) so the curve cannot invert. Over/under confidence
+ * is a separate score and is not in this map. Recalculated from stored games
+ * at bootstrap and Backtest — not a hand-tuned table. The map does not choose
+ * the side.
  */
 
-const { scoresReady, atsLetter, toNumber } = require('./grader');
+const { scoresReady, atsLetter } = require('./grader');
 const { HISTORY_FROM_SEASON } = require('./seasons');
 
 const CALIBRATION_TARGET = 'ats';
@@ -23,7 +25,7 @@ const PRIOR_STRENGTH = 12;
 const DISPLAY_MIN = 1;
 const DISPLAY_MAX = 99;
 
-const CALIBRATION_NOTE = 'Displayed confidence is a calibrated historical ATS hit rate (2016+ scored regular-season games). The raw 51–92 edge/sample rule is mapped with isotonic (monotone) reliability so this % tracks ATS hit rate by raw-score bucket. Over/under is graded separately and is not the calibration target.';
+const CALIBRATION_NOTE = 'ATS confidence is a calibrated historical ATS hit rate (2016+ scored regular-season games). The raw ATS edge/sample rule — with no over/under edge mixed in — is mapped with isotonic (monotone) reliability so this % tracks ATS hit rate by raw-score bucket. O/U confidence is a separate edge/sample score for the total and is not that ATS hit rate.';
 
 let activeMap = null;
 
@@ -187,7 +189,7 @@ function bumpScoringRates(rates, game) {
 }
 
 function collectAtsSamples(games) {
-  const { aiConfidence, projectGameFromRates } = require('./week-view');
+  const { aiPick, projectGameFromRates } = require('./week-view');
   const sorted = [...(games || [])]
     .filter((g) => scoresReady(g) && g.game_type !== 'PRE' && Number(g.season) >= HISTORY_FROM_SEASON)
     .sort((a, b) => Date.parse(a.kickoff) - Date.parse(b.kickoff) || String(a.game_id).localeCompare(String(b.game_id)));
@@ -195,15 +197,11 @@ function collectAtsSamples(games) {
   const samples = [];
   for (const game of sorted) {
     const projection = projectGameFromRates(game, rates.get(game.home_team), rates.get(game.away_team));
-    const raw = aiConfidence(game, projection);
-    let atsTeam = projection.atsTeam || null;
-    if (!atsTeam && !projection.hasHistory && toNumber(game.spread_line) != null) {
-      atsTeam = toNumber(game.spread_line) > 0 ? game.away_team : game.home_team;
-    }
-    if (atsTeam) {
-      const letter = atsLetter(game, atsTeam);
-      if (letter === 'C') samples.push({ raw, hit: 1, game_id: game.game_id });
-      else if (letter === 'F') samples.push({ raw, hit: 0, game_id: game.game_id });
+    const pick = aiPick(game, projection, { calibrate: false });
+    if (pick.atsTeam && pick.rawConfidence != null) {
+      const letter = atsLetter(game, pick.atsTeam);
+      if (letter === 'C') samples.push({ raw: pick.rawConfidence, hit: 1, game_id: game.game_id });
+      else if (letter === 'F') samples.push({ raw: pick.rawConfidence, hit: 0, game_id: game.game_id });
     }
     bumpScoringRates(rates, game);
   }
@@ -229,8 +227,12 @@ function sliceBrierStats(obs) {
     if (!grade || (grade.atsHit !== 'W' && grade.atsHit !== 'L')) continue;
     const y = grade.atsHit === 'W' ? 1 : 0;
     const pick = o.pick || {};
-    const raw = pick.rawConfidence != null ? Number(pick.rawConfidence) : null;
-    const cal = pick.confidence != null ? Number(pick.confidence) : null;
+    const raw = pick.rawAtsConfidence != null
+      ? Number(pick.rawAtsConfidence)
+      : (pick.rawConfidence != null ? Number(pick.rawConfidence) : null);
+    const cal = pick.atsConfidence != null
+      ? Number(pick.atsConfidence)
+      : (pick.confidence != null ? Number(pick.confidence) : null);
     if (Number.isFinite(raw)) rawPairs.push({ p: raw / 100, y });
     if (Number.isFinite(cal)) calPairs.push({ p: cal / 100, y });
   }
