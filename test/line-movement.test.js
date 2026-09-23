@@ -15,7 +15,7 @@ const { BUILD } = require('../src/build');
 const { loadSchemaSql } = require('../src/schema');
 
 test('build version is major.minor', () => {
-  assert.equal(BUILD, '11.0');
+  assert.equal(BUILD, '1.11');
   assert.match(String(BUILD), /^\d+\.\d+$/);
 });
 

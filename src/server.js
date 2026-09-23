@@ -33,6 +33,7 @@ const { persistAiPicks, listAiPicks, applyAiSnapshots } = require('./ai-picks');
 const { historyWindow } = require('./seasons');
 const { BUILD } = require('./build');
 const { attachLiveScores, resolveLiveScores } = require('./espn-live');
+const { attachInjuries } = require('./espn-injuries');
 
 const ROOT = path.join(__dirname, '..');
 const PUBLIC = path.join(ROOT, 'public');
@@ -430,7 +431,8 @@ async function handleApi(req, res, url) {
       week
     );
     const liveAttach = await attachLiveScores(cards, { sql });
-    const presented = presentWeek(liveAttach.cards, user);
+    const injuryAttach = await attachInjuries(liveAttach.cards, { sql });
+    const presented = presentWeek(injuryAttach.cards, user);
     const poolId = user ? user.pool_id : sql ? (await getPool(sql)).id : null;
     const board = poolId ? await standings(sql, poolId, season, week) : [];
     return json(res, 200, {
@@ -488,7 +490,8 @@ async function handleApi(req, res, url) {
       week
     );
     const liveAttach = await attachLiveScores(cards, { sql });
-    const presented = presentWeek(liveAttach.cards, user);
+    const injuryAttach = await attachInjuries(liveAttach.cards, { sql });
+    const presented = presentWeek(injuryAttach.cards, user);
     const weeks = weeksForSeason(games, season);
     return json(res, 200, {
       ok: true,

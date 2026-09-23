@@ -174,6 +174,31 @@ test('chain last-game win shrinks the slice versus the year baseline', () => {
   assert.equal(lastStep.n, chained.n);
 });
 
+test('matching rows keep filter fields even when a value is n/a', () => {
+  const rows = backtestPayload([
+    game({
+      game_id: 'home',
+      home_team: 'BUF',
+      away_team: 'MIA',
+      kickoff: '2024-09-08T17:00:00Z'
+    })
+  ], {
+    filters: parseBacktestFilters({ team: 'BUF', from: 2024, to: 2024, site: 'home', timeOfDay: 'early' })
+  }).games;
+  assert.equal(rows.length, 1);
+  const row = rows[0];
+  assert.equal(row.team, 'BUF');
+  assert.equal(row.site, 'home');
+  assert.equal(row.timeOfDay, 'early');
+  assert.equal(Object.prototype.hasOwnProperty.call(row, 'travel'), true);
+  assert.equal(row.travel, 'none');
+  assert.equal(Object.prototype.hasOwnProperty.call(row, 'spreadBucket'), true);
+  assert.equal(Object.prototype.hasOwnProperty.call(row, 'totalBucket'), true);
+  assert.equal(Object.prototype.hasOwnProperty.call(row, 'restBucket'), true);
+  assert.equal(Object.prototype.hasOwnProperty.call(row, 'roofLabel'), true);
+  assert.equal(Object.prototype.hasOwnProperty.call(row, 'distanceLabel'), true);
+});
+
 test('parseBacktestFilters adds spread and total buckets', () => {
   const f = parseBacktestFilters({ team: 'SEA', spread: 'large', total: 'high', from: 2016, to: 2024 });
   assert.equal(f.spread, 'large');
