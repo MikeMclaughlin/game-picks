@@ -2,7 +2,7 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { impliedPoints, projectGame, projectGameFromRates, applyGameToRates, formatAtsPick, currentSeasonWeek, enrichGame, lastGameInfo, showRestDays, showRestWinPct, restAmountWinPct, lastFiveOutright, lastFiveAts, aiConfidence, expectedCallLabel, aiPick, seasonRecord, formatRecord, settleStrip, favoriteAtsTone, compareWeekGames, weekVersus, cardPhase, defaultExpanded } = require('../src/week-view');
+const { impliedPoints, projectGame, projectGameFromRates, applyGameToRates, formatAtsPick, currentSeasonWeek, enrichGame, lastGameInfo, showRestDays, showRestWinPct, restAmountWinPct, lastFiveOutright, lastFiveAts, aiConfidence, ouConfidenceRaw, expectedCallLabel, aiPick, seasonRecord, formatRecord, settleStrip, favoriteAtsTone, compareWeekGames, weekVersus, cardPhase, defaultExpanded } = require('../src/week-view');
 const { resetCalibration } = require('../src/calibration');
 const { roadTravel, teamCity } = require('../src/teams');
 const { UPSERT_SQL } = require('../src/nfl-data');
@@ -192,12 +192,23 @@ test('enrichGame exposes lastGame, city, short rest, and xPts from the line', ()
   assert.equal(Object.prototype.hasOwnProperty.call(card.away, 'restWinPct'), true);
   assert.equal(card.kickoffSlot, 'slot-thu');
   assert.equal(Object.prototype.hasOwnProperty.call(card.aiPick, 'confidence'), true);
-  assert.equal(typeof card.aiPick.confidence, 'number');
-  assert.ok(card.aiPick.confidence >= 1 && card.aiPick.confidence <= 99);
-  assert.equal(typeof card.aiPick.rawConfidence, 'number');
-  assert.ok(card.aiPick.rawConfidence >= 51 && card.aiPick.rawConfidence <= 92);
-  assert.ok(card.aiPick.expected);
-  assert.match(card.aiPick.expected, / and /);
+  assert.equal(Object.prototype.hasOwnProperty.call(card.aiPick, 'atsConfidence'), true);
+  assert.equal(Object.prototype.hasOwnProperty.call(card.aiPick, 'ouConfidence'), true);
+  assert.equal(card.aiPick.confidence, card.aiPick.atsConfidence);
+  if (card.aiPick.ats) {
+    assert.equal(typeof card.aiPick.confidence, 'number');
+    assert.ok(card.aiPick.confidence >= 1 && card.aiPick.confidence <= 99);
+    assert.equal(typeof card.aiPick.rawConfidence, 'number');
+    assert.ok(card.aiPick.rawConfidence >= 51 && card.aiPick.rawConfidence <= 92);
+  }
+  if (card.aiPick.ou) {
+    assert.equal(typeof card.aiPick.ouConfidence, 'number');
+    assert.ok(card.aiPick.ouConfidence >= 51 && card.aiPick.ouConfidence <= 92);
+  } else {
+    assert.match(String(card.aiPick.ouNote || ''), /pass under/);
+  }
+  assert.ok(card.aiPick.expected || card.aiPick.label);
+  if (card.aiPick.ats && card.aiPick.ou) assert.match(card.aiPick.expected, / and /);
   assert.equal(card.spread_open, 5.5);
   assert.equal(card.total_open, 54.5);
   assert.equal(card.spreadMove.moved, false);
@@ -385,7 +396,8 @@ test('expected call label and confidence stay in documented bounds', () => {
   resetCalibration();
   assert.equal(expectedCallLabel('BUF -5.5', 'over'), 'BUF -5.5 and Over');
   assert.equal(expectedCallLabel('SEA +3', 'under'), 'SEA +3 and Under');
-  assert.equal(aiConfidence({ total_line: 46 }, { hasHistory: false, fadeHighTotal: true }), 54);
+  assert.equal(ouConfidenceRaw({ total_line: 46 }, { hasHistory: false, fadeHighTotal: true }), 54);
+  assert.equal(aiConfidence({ total_line: 46 }, { hasHistory: false, fadeHighTotal: true }), 52);
   assert.equal(aiConfidence({ total_line: 40 }, { hasHistory: false, fadeHighTotal: false }), 52);
   const high = aiConfidence(
     { spread_line: 3, total_line: 44 },
@@ -402,8 +414,21 @@ test('expected call label and confidence stay in documented bounds', () => {
   });
   assert.equal(pick.expected, 'BUF -5.5 and Over');
   assert.equal(typeof pick.confidence, 'number');
+  assert.equal(pick.confidence, pick.atsConfidence);
+  assert.equal(typeof pick.ouConfidence, 'number');
   assert.ok(pick.rawConfidence >= 51 && pick.rawConfidence <= 92);
   assert.ok(pick.confidence >= 1 && pick.confidence <= 99);
+  const sameSpread = { ...pick };
+  const louderTotal = aiPick({ home_team: 'BUF', away_team: 'MIA', spread_line: 5.5, total_line: 48 }, {
+    hasHistory: true,
+    atsTeam: 'BUF',
+    ou: 'over',
+    projMargin: 8,
+    projTotal: 70,
+    sampleN: 40
+  });
+  assert.equal(louderTotal.rawConfidence, sameSpread.rawConfidence);
+  assert.notEqual(louderTotal.rawOuConfidence, pick.rawOuConfidence);
 });
 
 test('equal scoring rates pick the home side once home field is included', () => {
@@ -643,4 +668,143 @@ test('last five keeps ties and spread pushes in the string', () => {
   ];
   assert.equal(lastFiveOutright(history, 'SEA', '2024-09-22T17:00:00Z'), 'L-T');
   assert.equal(lastFiveAts(history, 'SEA', '2024-09-22T17:00:00Z'), 'F-P');
+});
+
+test('huge dogs are not the gold ATS pick', () => {
+  resetCalibration();
+  const base = {
+    hasHistory: true,
+    ou: 'over',
+    projTotal: 48,
+    sampleN: 40
+  };
+  const ml = aiPick(
+    { home_team: 'SF', away_team: 'MIA', spread_line: 13.5, total_line: 45.5, weekday: 'Sunday' },
+    { ...base, atsTeam: 'MIA', projMargin: -2 }
+  );
+  assert.equal(ml.ats, null);
+  assert.equal(ml.atsTeam, null);
+  assert.equal(ml.ml, 'MIA ML');
+  assert.equal(ml.atsMarket, 'ml');
+  assert.equal(ml.confidence, null);
+  assert.match(ml.expected, /MIA ML and Over/);
+
+  const pass = aiPick(
+    { home_team: 'SF', away_team: 'MIA', spread_line: 13.5, total_line: 45.5, weekday: 'Sunday' },
+    { ...base, atsTeam: 'MIA', projMargin: 3 }
+  );
+  assert.equal(pass.atsMarket, 'pass');
+  assert.equal(pass.ml, null);
+  assert.match(pass.atsNote, /too big a dog/);
+
+  const homeDog = aiPick(
+    { home_team: 'ARI', away_team: 'SEA', spread_line: -12, total_line: 44, weekday: 'Sunday' },
+    { ...base, atsTeam: 'ARI', projMargin: -4 }
+  );
+  assert.equal(homeDog.atsTeam, null);
+  assert.equal(homeDog.atsMarket, 'pass');
+});
+
+test('small home-dog fade after 50 allowed needs a bigger edge', () => {
+  resetCalibration();
+  const game = { home_team: 'CAR', away_team: 'CHI', spread_line: -2.5, total_line: 44, weekday: 'Sunday' };
+  const soft = aiPick(game, {
+    hasHistory: true,
+    atsTeam: 'CHI',
+    ou: 'over',
+    projMargin: -4,
+    projTotal: 48,
+    sampleN: 20,
+    homeLastAllowed: 59
+  });
+  assert.equal(soft.atsTeam, null);
+  assert.match(soft.atsNote, /allowed 59/);
+
+  const loud = aiPick(game, {
+    hasHistory: true,
+    atsTeam: 'CHI',
+    ou: 'over',
+    projMargin: -10,
+    projTotal: 48,
+    sampleN: 20,
+    homeLastAllowed: 59
+  });
+  assert.equal(loud.atsTeam, 'CHI');
+  assert.match(loud.atsNote, /flag/);
+});
+
+test('TNF and 50+ totals veto high-confidence unders and discount mild ones', () => {
+  resetCalibration();
+  const veto = aiPick(
+    { home_team: 'BUF', away_team: 'DET', spread_line: 4.5, total_line: 54.5, weekday: 'Thursday' },
+    { hasHistory: true, atsTeam: 'BUF', ou: 'under', projMargin: 8, projTotal: 40, sampleN: 40 }
+  );
+  assert.equal(veto.ou, null);
+  assert.match(veto.ouNote, /TNF/);
+  assert.match(veto.ouNote, /50\+/);
+  assert.equal(veto.ouConfidence, null);
+  assert.equal(veto.atsTeam, 'BUF');
+
+  const mild = aiPick(
+    { home_team: 'GB', away_team: 'ATL', spread_line: 3, total_line: 46.5, weekday: 'Thursday' },
+    { hasHistory: true, atsTeam: 'GB', ou: 'under', projMargin: 4, projTotal: 44.5, sampleN: 40 }
+  );
+  assert.equal(mild.ou, 'under');
+  assert.ok(mild.ouConfidence <= 55);
+  assert.ok(mild.ouConfidence < mild.rawOuConfidence);
+  assert.match(mild.ouNote, /discounted/);
+
+  const sundayHigh = aiPick(
+    { home_team: 'DAL', away_team: 'BAL', spread_line: -3, total_line: 52.5, weekday: 'Sunday' },
+    { hasHistory: true, atsTeam: 'BAL', ou: 'under', projMargin: -6, projTotal: 40, sampleN: 40 }
+  );
+  assert.equal(sundayHigh.ou, null);
+  assert.match(sundayHigh.ouNote, /total 50\+/);
+});
+
+test('road favorite that lost its starter is not faded without backup evidence', () => {
+  resetCalibration();
+  const game = {
+    home_team: 'ARI',
+    away_team: 'SEA',
+    spread_line: -3.5,
+    total_line: 41,
+    weekday: 'Sunday',
+    away_qb_name: 'Drew Lock'
+  };
+  const thin = aiPick(game, {
+    hasHistory: true,
+    atsTeam: 'ARI',
+    ou: 'over',
+    projMargin: -8,
+    projTotal: 44,
+    sampleN: 30,
+    awayQb: {
+      lastQb: 'geno smith',
+      qbByName: new Map([
+        ['geno smith', { n: 10, points: 240 }],
+        ['drew lock', { n: 1, points: 14 }]
+      ])
+    }
+  });
+  assert.equal(thin.atsTeam, null);
+  assert.match(thin.atsNote, /lost starter/);
+
+  const shown = aiPick(game, {
+    hasHistory: true,
+    atsTeam: 'ARI',
+    ou: 'over',
+    projMargin: -8,
+    projTotal: 44,
+    sampleN: 30,
+    awayQb: {
+      lastQb: 'geno smith',
+      qbByName: new Map([
+        ['geno smith', { n: 10, points: 240 }],
+        ['drew lock', { n: 3, points: 30 }]
+      ])
+    }
+  });
+  assert.equal(shown.atsTeam, 'ARI');
+  assert.equal(shown.ats, 'ARI +3.5');
 });

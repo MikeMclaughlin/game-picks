@@ -13,6 +13,8 @@ test('schema SQL is bundled and splits into statements', () => {
   assert.match(text, /clerk_user_id/);
   assert.match(text, /ADD COLUMN IF NOT EXISTS clerk_user_id/);
   assert.match(text, /ADD COLUMN IF NOT EXISTS spread_open NUMERIC/);
+  assert.match(text, /ADD COLUMN IF NOT EXISTS frozen_at/);
+  assert.match(text, /ADD COLUMN IF NOT EXISTS home_qb_name/);
   assert.match(text, /ADD COLUMN IF NOT EXISTS total_open NUMERIC/);
   const stmts = splitSqlStatements(text);
   assert.ok(stmts.length >= 8);
@@ -52,7 +54,7 @@ test('batch upsert keeps COALESCE for scores and lines', () => {
   assert.match(UPSERT_SQL, /total_line = COALESCE\(EXCLUDED\.total_line, games\.total_line\)/);
   assert.match(UPSERT_SQL, /total_open = COALESCE\(games\.total_open, EXCLUDED\.total_open, EXCLUDED\.total_line\)/);
   assert.equal(params[0], 'a');
-  assert.equal(params.length, 22);
+  assert.equal(params.length, 24);
 });
 
 test('bundled seed covers 2016 through current', () => {

@@ -52,6 +52,8 @@ CREATE TABLE IF NOT EXISTS games (
   wind NUMERIC,
   location TEXT,
   overtime INT,
+  home_qb_name TEXT,
+  away_qb_name TEXT,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -65,6 +67,8 @@ ALTER TABLE games ADD COLUMN IF NOT EXISTS spread_open NUMERIC;
 ALTER TABLE games ADD COLUMN IF NOT EXISTS total_open NUMERIC;
 ALTER TABLE games ADD COLUMN IF NOT EXISTS spread_open_at TIMESTAMPTZ;
 ALTER TABLE games ADD COLUMN IF NOT EXISTS total_open_at TIMESTAMPTZ;
+ALTER TABLE games ADD COLUMN IF NOT EXISTS home_qb_name TEXT;
+ALTER TABLE games ADD COLUMN IF NOT EXISTS away_qb_name TEXT;
 
 UPDATE games
 SET
@@ -136,8 +140,11 @@ CREATE TABLE IF NOT EXISTS ai_picks (
   total_line NUMERIC,
   payload JSONB NOT NULL,
   generated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  frozen_at TIMESTAMPTZ
 );
+
+ALTER TABLE ai_picks ADD COLUMN IF NOT EXISTS frozen_at TIMESTAMPTZ;
 
 CREATE INDEX IF NOT EXISTS ai_picks_season_week_idx ON ai_picks (season, week);
 

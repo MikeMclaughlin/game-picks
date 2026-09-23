@@ -3,7 +3,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { requireAdmin, bearerToken } = require('../src/http-util');
-const { persistAiPicks, pickPayload } = require('../src/ai-picks');
+const { persistAiPicks, pickPayload, applyAiSnapshots, decidePersist, pickFromPayload } = require('../src/ai-picks');
 const { HISTORY_FROM_SEASON, defaultSeasons, historyWindow } = require('../src/seasons');
 
 test('requireAdmin allows CRON_SECRET bearer when ADMIN_KEY is set', () => {
@@ -55,6 +55,75 @@ test('persistAiPicks no-ops without sql and pickPayload keeps served AI fields',
   assert.equal(payload.label, 'SEA -3 · take the under 44.5');
   assert.equal(payload.expected, 'SEA -3 and Under');
   assert.equal(payload.confidence, 61);
+  assert.equal(payload.atsConfidence, 61);
+});
+
+test('locked games serve the stored snapshot and do not rewrite a frozen pick', () => {
+  const fresh = {
+    game_id: '2026_02_SEA_ARI',
+    season: 2026,
+    week: 2,
+    locked: true,
+    home_team: 'ARI',
+    away_team: 'SEA',
+    spread_line: -3.5,
+    total_line: 40.5,
+    aiPick: {
+      ats: 'ARI +3.5',
+      ou: 'over',
+      label: 'ARI +3.5 · take the over 40.5',
+      expected: 'ARI +3.5 and Over',
+      confidence: 70,
+      atsConfidence: 70,
+      ouConfidence: 61,
+      atsTeam: 'ARI',
+      ouText: 'take the over 40.5'
+    }
+  };
+  const stored = {
+    ats: 'SEA -3.5',
+    ou: 'under',
+    ouText: 'take the under 40.5',
+    label: 'SEA -3.5 · take the under 40.5',
+    expected: 'SEA -3.5 and Under',
+    confidence: 58,
+    atsConfidence: 58,
+    ouConfidence: 54,
+    atsTeam: 'SEA'
+  };
+  const frozen = applyAiSnapshots([fresh], [{
+    game_id: fresh.game_id,
+    frozen_at: '2026-09-20T20:25:00Z',
+    payload: stored
+  }]);
+  assert.equal(frozen[0].aiPick.ats, 'SEA -3.5');
+  assert.equal(frozen[0].aiPick.ou, 'under');
+  assert.equal(frozen[0].aiPick.atsConfidence, 58);
+  assert.equal(frozen[0].aiPick.ouConfidence, 54);
+  assert.equal(frozen[0].aiPickFrozen, true);
+  assert.equal(decidePersist(frozen[0]).action, 'skip');
+
+  const pregameRow = applyAiSnapshots([fresh], [{
+    game_id: fresh.game_id,
+    frozen_at: null,
+    payload: stored
+  }]);
+  assert.equal(pregameRow[0].aiPick.label, stored.label);
+  assert.equal(pregameRow[0].aiPickFreezeNow, true);
+  assert.equal(decidePersist(pregameRow[0]).freeze, true);
+
+  const open = applyAiSnapshots([{ ...fresh, locked: false }], [{
+    game_id: fresh.game_id,
+    frozen_at: null,
+    payload: stored
+  }]);
+  assert.equal(open[0].aiPick.ats, 'ARI +3.5');
+  assert.equal(decidePersist(open[0]).freeze, false);
+
+  const firstLock = applyAiSnapshots([{ ...fresh, locked: true }], []);
+  assert.equal(firstLock[0].aiPick.ats, 'ARI +3.5');
+  assert.equal(firstLock[0].aiPickFreezeNow, true);
+  assert.equal(pickFromPayload(JSON.stringify(stored)).expected, stored.expected);
 });
 
 test('history window starts at 2016', () => {

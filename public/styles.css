@@ -258,6 +258,9 @@ h1, h2 { margin: 0 0 8px; font-size: 22px; font-weight: 700; letter-spacing: 0.0
   display: inline; margin-left: 0; color: var(--gold); font-weight: 800;
   font-variant-numeric: tabular-nums;
 }
+.ai-note {
+  margin-top: 4px; color: var(--muted); font-size: 11px; text-align: center; line-height: 1.35;
+}
 .picks { display: grid; gap: 4px; margin-top: auto; }
 .week-cards .picks { margin-top: auto; }
 .pick { display: grid; grid-template-columns: 72px 1fr 1fr; gap: 4px 6px; align-items: center; }

@@ -156,7 +156,9 @@ function mapGame(row) {
     temp: row.temp == null ? null : Number(row.temp),
     wind: row.wind == null ? null : Number(row.wind),
     location: row.location,
-    overtime: row.overtime == null ? null : Number(row.overtime)
+    overtime: row.overtime == null ? null : Number(row.overtime),
+    home_qb_name: row.home_qb_name || null,
+    away_qb_name: row.away_qb_name || null
   };
 }
 

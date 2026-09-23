@@ -14,9 +14,9 @@ const { UPSERT_SQL, UPSERT_CONFLICT, buildBatchUpsert } = require('../src/nfl-da
 const { BUILD } = require('../src/build');
 const { loadSchemaSql } = require('../src/schema');
 
-test('build version is a positive integer', () => {
-  assert.equal(typeof BUILD, 'number');
-  assert.ok(BUILD >= 5);
+test('build version is major.minor', () => {
+  assert.equal(BUILD, '11.0');
+  assert.match(String(BUILD), /^\d+\.\d+$/);
 });
 
 test('resolveOpening keeps the first stored open and takes first current when empty', () => {
@@ -189,7 +189,7 @@ test('upsert SQL updates current lines and never overwrites a stored opening', (
   assert.doesNotMatch(text, /CASE WHEN \$13 IS NULL/);
   assert.match(UPSERT_SQL, /\$13::numeric/);
   assert.match(UPSERT_SQL, /CASE WHEN \$13::numeric IS NULL THEN NULL::timestamptz/);
-  assert.equal(params.length, 22);
+  assert.equal(params.length, 24);
   assert.equal(params[12], 3);
   assert.equal(params[13], 44.5);
 });
@@ -247,13 +247,13 @@ test('batch upsert casts reused line params so null spreads still type as numeri
   ];
   const { text, params } = buildBatchUpsert(batch);
   assert.match(text, /\$13::numeric/);
-  assert.match(text, /\$35::numeric/);
-  assert.match(text, /CASE WHEN \$35::numeric IS NULL THEN NULL::timestamptz ELSE now\(\) END/);
-  assert.equal(params.length, 44);
+  assert.match(text, /\$37::numeric/);
+  assert.match(text, /CASE WHEN \$37::numeric IS NULL THEN NULL::timestamptz ELSE now\(\) END/);
+  assert.equal(params.length, 48);
   assert.equal(params[12], null);
   assert.equal(params[13], null);
-  assert.equal(params[34], -3.5);
-  assert.equal(params[35], 47.5);
+  assert.equal(params[36], -3.5);
+  assert.equal(params[37], 47.5);
 });
 
 test('schema persists opening columns and backfills existing rows', () => {

@@ -32,6 +32,12 @@ function num(value) {
   return Number.isFinite(n) ? n : null;
 }
 
+function textOrNull(value) {
+  if (value == null) return null;
+  const s = String(value).trim();
+  return s || null;
+}
+
 function parseCsv(text) {
   const rows = [];
   let row = [];
@@ -132,7 +138,9 @@ function normalizeGame(raw) {
     temp: num(raw.temp),
     wind: num(raw.wind),
     location: raw.location || 'Home',
-    overtime: num(raw.overtime)
+    overtime: num(raw.overtime),
+    home_qb_name: textOrNull(raw.home_qb_name ?? raw.home_qb ?? raw.homeQb),
+    away_qb_name: textOrNull(raw.away_qb_name ?? raw.away_qb ?? raw.awayQb)
   };
 }
 
@@ -227,7 +235,8 @@ function filterSeasons(games, wanted) {
 const GAME_COLUMNS = [
   'game_id', 'season', 'week', 'game_type', 'kickoff', 'gameday', 'weekday', 'gametime',
   'home_team', 'away_team', 'home_score', 'away_score', 'spread_line', 'total_line',
-  'home_rest', 'away_rest', 'roof', 'surface', 'temp', 'wind', 'location', 'overtime'
+  'home_rest', 'away_rest', 'roof', 'surface', 'temp', 'wind', 'location', 'overtime',
+  'home_qb_name', 'away_qb_name'
 ];
 
 const UPSERT_CONFLICT = `
@@ -265,6 +274,8 @@ ON CONFLICT (game_id) DO UPDATE SET
   wind = COALESCE(EXCLUDED.wind, games.wind),
   location = COALESCE(EXCLUDED.location, games.location),
   overtime = COALESCE(EXCLUDED.overtime, games.overtime),
+  home_qb_name = COALESCE(EXCLUDED.home_qb_name, games.home_qb_name),
+  away_qb_name = COALESCE(EXCLUDED.away_qb_name, games.away_qb_name),
   updated_at = now()
 `;
 
@@ -282,7 +293,7 @@ function openingInsertTail(spreadIdx, totalIdx) {
 
 function gameValuesClause(base = 0) {
   const p = (n, cast) => typedParam(base + n, cast);
-  return `(${p(1)},${p(2)},${p(3)},${p(4)},${p(5, 'timestamptz')},${p(6)},${p(7)},${p(8)},${p(9)},${p(10)},${p(11)},${p(12)},${p(13, 'numeric')},${p(14, 'numeric')},${p(15)},${p(16)},${p(17)},${p(18)},${p(19)},${p(20)},${p(21)},${p(22)}, ${openingInsertTail(base + 13, base + 14)})`;
+  return `(${p(1)},${p(2)},${p(3)},${p(4)},${p(5, 'timestamptz')},${p(6)},${p(7)},${p(8)},${p(9)},${p(10)},${p(11)},${p(12)},${p(13, 'numeric')},${p(14, 'numeric')},${p(15)},${p(16)},${p(17)},${p(18)},${p(19)},${p(20)},${p(21)},${p(22)},${p(23)},${p(24)}, ${openingInsertTail(base + 13, base + 14)})`;
 }
 
 const UPSERT_SQL = `
@@ -315,12 +326,16 @@ function gameParams(g) {
     g.temp,
     g.wind,
     g.location,
-    g.overtime
+    g.overtime,
+    g.home_qb_name || null,
+    g.away_qb_name || null
   ];
 }
 
+const PARAMS_PER_GAME = 24;
+
 function buildBatchUpsert(batch) {
-  const cols = 22;
+  const cols = PARAMS_PER_GAME;
   const placeholders = batch.map((_, i) => gameValuesClause(i * cols)).join(',');
   const text = `INSERT INTO games (${GAME_COLUMNS.join(', ')}, spread_open, total_open, spread_open_at, total_open_at, updated_at) VALUES ${placeholders} ${UPSERT_CONFLICT}`;
   const params = batch.flatMap(gameParams);

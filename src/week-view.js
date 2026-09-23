@@ -294,7 +294,11 @@ function blankRate() {
     awayFor: 0,
     awayAgainst: 0,
     awayN: 0,
-    recent: []
+    recent: [],
+    lastAllowed: null,
+    lastScored: null,
+    lastQb: null,
+    qbByName: new Map()
   };
 }
 
@@ -381,11 +385,21 @@ function projectFromProfiles(game, home, away) {
     fadeHighTotal: false,
     ou,
     atsTeam,
-    siteAdjusted: siteReady
+    siteAdjusted: siteReady,
+    homeLastAllowed: home.lastAllowed == null ? null : home.lastAllowed,
+    awayLastAllowed: away.lastAllowed == null ? null : away.lastAllowed,
+    homeQb: { lastQb: home.lastQb || null, qbByName: home.qbByName || new Map() },
+    awayQb: { lastQb: away.lastQb || null, qbByName: away.qbByName || new Map() }
   };
 }
 
-function addGameToProfile(profile, scored, allowed, site) {
+function normQb(name) {
+  if (name == null) return null;
+  const s = String(name).trim().toLowerCase().replace(/\s+/g, ' ');
+  return s || null;
+}
+
+function addGameToProfile(profile, scored, allowed, site, qbName) {
   profile.for += scored;
   profile.against += allowed;
   profile.n += 1;
@@ -401,6 +415,17 @@ function addGameToProfile(profile, scored, allowed, site) {
   profile.recent.push({ scored, allowed });
   if (profile.recent.length > RECENT_KEEP) {
     profile.recent.splice(0, profile.recent.length - RECENT_KEEP);
+  }
+  profile.lastAllowed = allowed;
+  profile.lastScored = scored;
+  const qb = normQb(qbName);
+  if (qb) {
+    if (!profile.qbByName || typeof profile.qbByName.get !== 'function') profile.qbByName = new Map();
+    const cur = profile.qbByName.get(qb) || { n: 0, points: 0 };
+    cur.n += 1;
+    cur.points += scored;
+    profile.qbByName.set(qb, cur);
+    profile.lastQb = qb;
   }
 }
 
@@ -419,7 +444,8 @@ function profileFromHistory(history, team, beforeKickoff) {
     const scored = home ? toNumber(g.home_score) : toNumber(g.away_score);
     const allowed = home ? toNumber(g.away_score) : toNumber(g.home_score);
     if (scored == null || allowed == null) continue;
-    addGameToProfile(profile, scored, allowed, home ? 'home' : 'away');
+    const qb = home ? g.home_qb_name : g.away_qb_name;
+    addGameToProfile(profile, scored, allowed, home ? 'home' : 'away', qb);
   }
   return profile.n ? profile : null;
 }
@@ -428,12 +454,12 @@ function applyGameToRates(rates, game) {
   const hs = toNumber(game.home_score);
   const as = toNumber(game.away_score);
   if (hs == null || as == null) return;
-  for (const [team, scored, allowed, site] of [
-    [game.home_team, hs, as, 'home'],
-    [game.away_team, as, hs, 'away']
+  for (const [team, scored, allowed, site, qb] of [
+    [game.home_team, hs, as, 'home', game.home_qb_name],
+    [game.away_team, as, hs, 'away', game.away_qb_name]
   ]) {
     const cur = rates.get(team) || blankRate();
-    addGameToProfile(cur, scored, allowed, site);
+    addGameToProfile(cur, scored, allowed, site, qb);
     rates.set(team, cur);
   }
 }
@@ -459,41 +485,191 @@ function clamp(n, lo, hi) {
   return Math.min(hi, Math.max(lo, n));
 }
 
-function expectedCallLabel(ats, ou) {
+function expectedCallLabel(ats, ou, ml) {
   const ouWord = ou === 'over' ? 'Over' : ou === 'under' ? 'Under' : null;
-  if (ats && ouWord) return `${ats} and ${ouWord}`;
-  return ats || ouWord || null;
+  const side = ats || ml || null;
+  if (side && ouWord) return `${side} and ${ouWord}`;
+  return side || ouWord || null;
+}
+
+const HUGE_DOG_SPREAD = 10;
+const BLOWN_DEFENSE_POINTS = 50;
+const SMALL_HOME_DOG_MAX = 3;
+const HOME_DOG_FADE_MIN_EDGE = 6;
+const HIGH_TOTAL = 50;
+const UNDER_VETO_RAW = 60;
+const UNDER_DISCOUNT = 10;
+const UNDER_CONF_CAP = 55;
+const BACKUP_MIN_STARTS = 2;
+const BACKUP_WORSE_PPG = 7;
+
+function sampleAdj(n) {
+  const nn = Number(n) || 0;
+  if (nn < 8) return -10;
+  if (nn < 16) return -5;
+  if (nn < 30) return -2;
+  if (nn >= 60) return 4;
+  return 0;
 }
 
 /**
- * Raw rule score 51–92 from projection edges and sample size.
- * This is the uncalibrated score fed into the isotonic ATS reliability map;
- * displayed `confidence` is the calibrated ATS hit rate (see calibration.js).
- * Base 52. ATS: +3.5 per |projMargin − spread| (cap +21). OU: +2 per |projTotal − total|
- * (cap +14). Sample n = min(home games, away games): <8 −10, <16 −5, <30 −2, ≥60 +4.
- * No-history heuristic (fade totals ≥46): 54; otherwise 52.
+ * Raw ATS score 51–92 from the spread edge and sample size only.
+ * Fed into the isotonic ATS reliability map. Over/under edge is not included.
+ * Base 52. +3.5 per |projMargin − spread| (cap +21).
+ * Sample n = min(home games, away games): <8 −10, <16 −5, <30 −2, ≥60 +4.
  */
 function aiConfidence(game, projection) {
-  if (!projection || !projection.hasHistory) {
-    return projection && projection.fadeHighTotal ? 54 : 52;
-  }
+  if (!projection || !projection.hasHistory) return 52;
   let score = 52;
   const spread = toNumber(game.spread_line);
-  const total = toNumber(game.total_line);
   if (spread != null && projection.projMargin != null) {
     const edge = Math.abs(projection.projMargin - spread);
     score += Math.min(21, edge * 3.5);
   }
+  score += sampleAdj(projection.sampleN);
+  return Math.round(clamp(score, 51, 92));
+}
+
+/**
+ * Raw O/U score 51–92 from the total edge and sample size only.
+ * Not passed through the ATS hit-rate map. No-history fade of totals ≥46 is 54.
+ */
+function ouConfidenceRaw(game, projection) {
+  if (!projection || !projection.hasHistory) {
+    return projection && projection.fadeHighTotal ? 54 : 52;
+  }
+  let score = 52;
+  const total = toNumber(game.total_line);
   if (total != null && projection.projTotal != null) {
     const edge = Math.abs(projection.projTotal - total);
-    score += Math.min(14, edge * 2);
+    score += Math.min(21, edge * 3.5);
   }
-  const n = Number(projection.sampleN) || 0;
-  if (n < 8) score -= 10;
-  else if (n < 16) score -= 5;
-  else if (n < 30) score -= 2;
-  else if (n >= 60) score += 4;
+  score += sampleAdj(projection.sampleN);
   return Math.round(clamp(score, 51, 92));
+}
+
+function teamSpread(team, game) {
+  const spread = toNumber(game.spread_line);
+  if (spread == null || !team) return null;
+  return team === game.home_team ? -spread : spread;
+}
+
+function projectionEdge(projection, game, team) {
+  const spread = toNumber(game.spread_line);
+  if (spread == null || !projection || projection.projMargin == null || !team) return 0;
+  return team === game.home_team
+    ? projection.projMargin - spread
+    : spread - projection.projMargin;
+}
+
+function outrightWinner(game, projection) {
+  if (!projection || !projection.hasHistory || projection.projMargin == null) return null;
+  if (projection.projMargin > 0) return game.home_team;
+  if (projection.projMargin < 0) return game.away_team;
+  return null;
+}
+
+function isThursdayNight(game) {
+  const wd = String((game && game.weekday) || '').toLowerCase();
+  if (wd.startsWith('thu')) return true;
+  return kickoffSlot(game) === 'slot-thu';
+}
+
+function qbRecord(snapshot, name) {
+  if (!snapshot || !snapshot.qbByName || !name) return null;
+  const map = snapshot.qbByName;
+  if (typeof map.get === 'function') return map.get(name) || null;
+  return map[name] || null;
+}
+
+function backupIsProblem(snapshot, backupName, starterName) {
+  const backup = qbRecord(snapshot, backupName);
+  if (!backup || Number(backup.n) < BACKUP_MIN_STARTS) return false;
+  const backupPpg = Number(backup.points) / Number(backup.n);
+  const starter = qbRecord(snapshot, starterName);
+  if (starter && Number(starter.n) >= 1) {
+    return backupPpg <= (Number(starter.points) / Number(starter.n)) - BACKUP_WORSE_PPG;
+  }
+  return backupPpg <= LEAGUE_PPG - BACKUP_WORSE_PPG;
+}
+
+/**
+ * Side gates. Huge dogs are never the gold ATS pick. A small home dog that
+ * just allowed 50+ needs a much larger edge before we fade them. A road
+ * favorite that changed quarterbacks is not faded unless the backup's own
+ * starts show a real scoring drop.
+ */
+function guardSides(game, projection, atsTeam) {
+  let team = atsTeam || null;
+  let mlTeam = null;
+  let atsNote = null;
+  let atsMarket = team ? 'ats' : null;
+  const line = teamSpread(team, game);
+  if (team && line != null && line >= HUGE_DOG_SPREAD) {
+    const shown = formatLine(line);
+    const su = outrightWinner(game, projection);
+    if (su && su === team) {
+      mlTeam = team;
+      atsMarket = 'ml';
+      atsNote = `moneyline only — ${team} +${shown} is not an ATS pick`;
+    } else {
+      atsMarket = 'pass';
+      atsNote = `pass ATS — ${team} +${shown} is too big a dog`;
+    }
+    team = null;
+  }
+  if (team && team !== game.home_team) {
+    const spread = toNumber(game.spread_line);
+    const smallHomeDog = spread != null && spread < 0 && Math.abs(spread) <= SMALL_HOME_DOG_MAX;
+    const allowed = projection && projection.homeLastAllowed;
+    if (smallHomeDog && allowed != null && Number(allowed) >= BLOWN_DEFENSE_POINTS) {
+      const edge = projectionEdge(projection, game, team);
+      if (edge < HOME_DOG_FADE_MIN_EDGE) {
+        atsMarket = 'pass';
+        atsNote = `pass ATS — ${game.home_team} allowed ${allowed} last game; small home-dog fade needs a bigger edge`;
+        team = null;
+      } else {
+        atsNote = `flag — fading small home dog ${game.home_team} after ${allowed} points allowed`;
+      }
+    }
+  }
+  if (team && team === game.home_team) {
+    const spread = toNumber(game.spread_line);
+    if (spread != null && spread < 0) {
+      const current = normQb(game.away_qb_name);
+      const prior = normQb(projection && projection.awayQb && projection.awayQb.lastQb);
+      if (current && prior && current !== prior && !backupIsProblem(projection.awayQb, current, prior)) {
+        atsMarket = 'pass';
+        atsNote = `pass ATS — ${game.away_team} lost starter; backup is not shown as the problem`;
+        team = null;
+      }
+    }
+  }
+  return { atsTeam: team, mlTeam, atsNote, atsMarket };
+}
+
+function guardTotal(game, projection, ouRaw) {
+  let ou = projection && projection.ou ? projection.ou : null;
+  let ouNote = null;
+  let shown = ou ? ouRaw : null;
+  const total = toNumber(game.total_line);
+  const tnf = isThursdayNight(game);
+  const high = total != null && total >= HIGH_TOTAL;
+  if (ou === 'under' && (tnf || high)) {
+    const why = [];
+    if (tnf) why.push('TNF');
+    if (high) why.push('total 50+');
+    const reason = why.join(' and ');
+    if (!projection.hasHistory || ouRaw >= UNDER_VETO_RAW) {
+      ou = null;
+      shown = null;
+      ouNote = `pass under — ${reason}`;
+    } else {
+      shown = Math.max(51, Math.min(UNDER_CONF_CAP, ouRaw - UNDER_DISCOUNT));
+      ouNote = `under discounted — ${reason}`;
+    }
+  }
+  return { ou, ouNote, ouShown: shown, ouRaw: ou ? ouRaw : null };
 }
 
 function projectGame(game, history) {
@@ -508,7 +684,11 @@ function projectGame(game, history) {
       projTotal: null,
       sampleN: 0,
       fadeHighTotal: total != null && total >= 46,
-      ou: total != null && total >= 46 ? 'under' : total != null ? 'over' : null
+      ou: total != null && total >= 46 ? 'under' : total != null ? 'over' : null,
+      homeLastAllowed: null,
+      awayLastAllowed: null,
+      homeQb: { lastQb: null, qbByName: new Map() },
+      awayQb: { lastQb: null, qbByName: new Map() }
     };
   }
   return projectFromProfiles(game, home, away);
@@ -518,8 +698,18 @@ function projectGameFromRates(game, home, away) {
   if (!home || !away || !home.n || !away.n) {
     return projectGame(game, []);
   }
-  const h = { ...blankRate(), ...home, recent: home.recent || [] };
-  const a = { ...blankRate(), ...away, recent: away.recent || [] };
+  const h = {
+    ...blankRate(),
+    ...home,
+    recent: home.recent || [],
+    qbByName: home.qbByName || new Map()
+  };
+  const a = {
+    ...blankRate(),
+    ...away,
+    recent: away.recent || [],
+    qbByName: away.qbByName || new Map()
+  };
   return projectFromProfiles(game, h, a);
 }
 
@@ -710,34 +900,45 @@ function annotateCard(card) {
 }
 
 function aiPick(game, projection, options = {}) {
+  const proj = projection || {};
   const total = formatLine(game.total_line);
-  let ats = null;
-  if (projection.atsTeam) {
-    ats = formatAtsPick(projection.atsTeam, game);
-  } else if (!projection.hasHistory && toNumber(game.spread_line) != null) {
-    const dog = toNumber(game.spread_line) > 0 ? game.away_team : game.home_team;
-    ats = formatAtsPick(dog, game);
-    projection.atsTeam = dog;
+  let sideTeam = proj.atsTeam || null;
+  if (!sideTeam && !proj.hasHistory && toNumber(game.spread_line) != null) {
+    const spread = toNumber(game.spread_line);
+    sideTeam = spread > 0 ? game.away_team : game.home_team;
   }
-  let ouText = null;
-  if (projection.ou && total != null) {
-    ouText = `take the ${projection.ou} ${total}`;
-  }
-  const expected = expectedCallLabel(ats, projection.ou);
-  const rawConfidence = aiConfidence(game, projection);
+  const sides = guardSides(game, proj, sideTeam);
+  const rawAts = sides.atsTeam ? aiConfidence(game, proj) : null;
+  const rawOuBase = proj.ou ? ouConfidenceRaw(game, proj) : null;
+  const totalGuard = guardTotal(game, proj, rawOuBase == null ? 52 : rawOuBase);
   const map = options.map === undefined
     ? (options.calibrate === false ? null : getActiveMap())
     : options.map;
-  const confidence = displayConfidence(rawConfidence, map);
+  const ats = sides.atsTeam ? formatAtsPick(sides.atsTeam, game) : null;
+  const ml = sides.mlTeam ? `${sides.mlTeam} ML` : null;
+  const atsConfidence = rawAts == null ? null : displayConfidence(rawAts, map);
+  let ouText = null;
+  if (totalGuard.ou && total != null) ouText = `take the ${totalGuard.ou} ${total}`;
+  const sideText = ats || ml || (sides.atsMarket === 'pass' ? sides.atsNote : null);
+  const totalText = ouText || totalGuard.ouNote;
   return {
     ats,
-    ou: projection.ou,
+    ou: totalGuard.ou,
     ouText,
-    label: [ats, ouText].filter(Boolean).join(' · ') || null,
-    expected,
-    confidence,
-    rawConfidence,
-    atsTeam: projection.atsTeam || null
+    ml,
+    mlTeam: sides.mlTeam,
+    atsMarket: sides.atsMarket,
+    atsNote: sides.atsNote,
+    ouNote: totalGuard.ouNote,
+    label: [sideText, totalText].filter(Boolean).join(' · ') || null,
+    expected: expectedCallLabel(ats, totalGuard.ou, ml),
+    confidence: atsConfidence,
+    atsConfidence,
+    ouConfidence: totalGuard.ou ? totalGuard.ouShown : null,
+    rawConfidence: rawAts,
+    rawAtsConfidence: rawAts,
+    rawOuConfidence: totalGuard.ou ? rawOuBase : null,
+    atsTeam: sides.atsTeam
   };
 }
 
@@ -875,7 +1076,10 @@ module.exports = {
   annotateCard,
   tallyResults,
   aiConfidence,
+  ouConfidenceRaw,
   expectedCallLabel,
+  guardSides,
+  guardTotal,
   enrichGame,
   currentSeasonWeek,
   pctLabel,

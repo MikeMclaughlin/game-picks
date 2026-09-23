@@ -404,6 +404,7 @@ const CSV_HEADERS = [
   'ou',
   'expected',
   'confidence',
+  'ou_confidence',
   'expected_ats_hit',
   'expected_ou_hit'
 ];
@@ -437,6 +438,7 @@ function toCsv(rows) {
       ou: row.ou,
       expected: row.expected,
       confidence: row.confidence,
+      ou_confidence: row.ouConfidence,
       expected_ats_hit: row.expectedAtsHit,
       expected_ou_hit: row.expectedOuHit
     };
@@ -488,8 +490,10 @@ function enrichObservation(obs, index) {
     expected: pick && pick.expected ? pick.expected : null,
     expectedAts: pick && pick.ats ? pick.ats : null,
     expectedOu: pick && pick.ou ? pick.ou : null,
-    confidence: pick && pick.confidence != null ? pick.confidence : null,
+    confidence: pick && pick.atsConfidence != null ? pick.atsConfidence : (pick && pick.confidence != null ? pick.confidence : null),
+    ouConfidence: pick && pick.ouConfidence != null ? pick.ouConfidence : null,
     rawConfidence: pick && pick.rawConfidence != null ? pick.rawConfidence : null,
+    rawOuConfidence: pick && pick.rawOuConfidence != null ? pick.rawOuConfidence : null,
     expectedAtsHit: expectedGrade ? expectedGrade.atsHit : null,
     expectedOuHit: expectedGrade ? expectedGrade.ouHit : null,
     expectedJoint: expectedGrade ? expectedGrade.joint : null
@@ -570,10 +574,17 @@ function expectedSummary(obs) {
   const joint = tally(obs, (o) => o.expectedGrade && o.expectedGrade.joint);
   let confSum = 0;
   let confN = 0;
+  let ouSum = 0;
+  let ouN = 0;
   for (const o of obs) {
-    if (o.pick && o.pick.confidence != null) {
-      confSum += o.pick.confidence;
+    const atsConf = o.pick && (o.pick.atsConfidence != null ? o.pick.atsConfidence : o.pick.confidence);
+    if (atsConf != null) {
+      confSum += atsConf;
       confN += 1;
+    }
+    if (o.pick && o.pick.ouConfidence != null) {
+      ouSum += o.pick.ouConfidence;
+      ouN += 1;
     }
   }
   const brier = sliceBrierStats(obs);
@@ -582,6 +593,7 @@ function expectedSummary(obs) {
     ou,
     joint,
     confidenceAvg: confN ? Math.round(confSum / confN) : null,
+    ouConfidenceAvg: ouN ? Math.round(ouSum / ouN) : null,
     calibrationTarget: CALIBRATION_TARGET,
     brierRaw: brier.brierRaw,
     brierCalibrated: brier.brierCalibrated,
@@ -696,7 +708,7 @@ function backtestPayload(games, options = {}) {
       ...NOTES,
       smallN: `Rates with N < ${SMALL_N} are greyed — treat them as noisy.`,
       confidence: CALIBRATION_NOTE,
-      expected: 'Expected call uses the same projection as Current Week AI Pick (recent form, site, rest, travel, and home field — not career scoring rate alone). ATS side + Over/Under.',
+      expected: 'Expected call uses the same projection as Current Week AI Pick (recent form, site, rest, travel, and home field — not career scoring rate alone). ATS confidence and O/U confidence are separate. A passed ATS side is not graded as a cover.',
       baseline: 'League baseline is all scored games in the selected year range (home perspective when no team is selected). Team baseline is that club’s unfiltered games in the same years.',
       chain: 'Each chain step further restricts games whose pre-game state matches that dimension (last-5 hot = 4–5 W or covers).',
       last5: 'hot = 4–5 wins/covers in the last 5 decided games; cold = 0–1; mixed = 2–3. Patterns shorter than 3 decided games are excluded from those buckets.',
