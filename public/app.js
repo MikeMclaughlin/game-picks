@@ -31,7 +31,9 @@
       },
       socialButtonsBlockButton__apple: { display: 'none' },
       socialButtonsIconButton__apple: { display: 'none' },
-      formButtonPrimary: { backgroundColor: '#FFB81C', color: '#111111' }
+      formButtonPrimary: { backgroundColor: '#FFB81C', color: '#111111' },
+      userButtonOuterIdentifier: { display: 'none' },
+      userButtonTrigger: { padding: '0px' }
     }
   };
 
@@ -558,12 +560,10 @@
     }
     return data;
   }
-  function setWho(user) {
-    const clerkUser = clerk && clerk.user;
-    const name = (user && user.username)
-      || (clerkUser && (clerkUser.fullName || clerkUser.username || (clerkUser.primaryEmailAddress && clerkUser.primaryEmailAddress.emailAddress)))
-      || '';
-    who.textContent = name ? `${name} · signed in` : '';
+  function setWho() {
+    if (!who) return;
+    who.textContent = '';
+    who.hidden = true;
   }
 
   function showAuthNotice(message) {
@@ -1353,8 +1353,32 @@
     return `<span class="ai-conf" title="${esc(title)}">${esc(label)} ${esc(String(Math.round(Number(value))))}% confidence</span>`;
   }
 
+  function formatAiLine(text) {
+    return esc(text).replace(/\b(over|under)\b/gi, (word) => `<b class="ou-word">${word.toUpperCase()}</b>`);
+  }
+
+  function injuryHtml(game) {
+    const rows = Array.isArray(game.injuries) ? game.injuries : [];
+    if (!rows.length) return '';
+    const blocks = [];
+    for (const side of ['away', 'home']) {
+      const team = side === 'away' ? game.away_team : game.home_team;
+      const mine = rows.filter((inj) => inj && (inj.side === side || (!inj.side && inj.team === team)));
+      if (!mine.length) continue;
+      const players = mine.map((inj) => {
+        const status = inj.status || '';
+        const pos = inj.position ? ` ${inj.position}` : '';
+        const cls = String(status).toLowerCase();
+        return `<span class="injury-player ${esc(cls)}" title="${esc(`${inj.name || 'Player'}${pos} · ${status}`)}">${esc(inj.name || 'Player')}${esc(pos)} <b>${esc(status)}</b></span>`;
+      }).join('');
+      blocks.push(`<div class="injury-side"><span class="injury-team" title="${esc(team)} injury report">${esc(team)}</span>${players}</div>`);
+    }
+    if (!blocks.length) return '';
+    return `<div class="injury-strip" title="ESPN injuries: Out and Doubtful, plus Questionable quarterbacks or the listed starter">${blocks.join('')}</div>`;
+  }
+
   function card(game) {
-    const pick = game.aiPick || {};
+    const pick = game.aiPickDisplay || game.aiPick || {};
     const aiRaw = pick.label
       || pick.expected
       || '';
@@ -1375,7 +1399,11 @@
     const extraNotes = [];
     if (pick.ats && pick.atsNote) extraNotes.push(pick.atsNote);
     if (pick.ou && pick.ouNote) extraNotes.push(pick.ouNote);
-    const noteHtml = extraNotes.length ? `<div class="ai-note">${extraNotes.map((n) => esc(n)).join(' · ')}</div>` : '';
+    const noteHtml = extraNotes.length ? `<div class="ai-note">${extraNotes.map((n) => formatAiLine(n)).join(' · ')}</div>` : '';
+    const frozen = Boolean(game.aiPickFrozen || game.aiPickFreezeNow);
+    const frozenHtml = frozen
+      ? `<span class="ai-frozen" title="This AI pick was frozen at kickoff. Later injury updates do not move it.">Frozen at lock</span>`
+      : '';
     const awayCity = (game.away && game.away.city) || game.away_team;
     const homeCity = (game.home && game.home.city) || game.home_team;
     const slot = kickoffSlotClass(game);
@@ -1403,7 +1431,8 @@
       <div class="card-details"${expanded ? '' : ' hidden'}>
         ${cardStatRows(game)}
         <div class="card-foot">
-          ${aiRaw ? `<div class="ai"><span>AI Pick:</span> ${esc(aiRaw)}${conf}</div>${noteHtml}` : ''}
+          ${injuryHtml(game)}
+          ${aiRaw ? `<div class="ai"><span>AI Pick:</span> ${formatAiLine(aiRaw)}${conf}${frozenHtml}</div>${noteHtml}` : ''}
           <div class="picks">
             ${pickRow(game, 'outright', game.away_team, game.home_team, outrightPickLabel(game.away_team), outrightPickLabel(game.home_team))}
             ${pickRow(game, 'ats', game.away_team, game.home_team, atsPickLabel(game, game.away_team), atsPickLabel(game, game.home_team), {
@@ -1505,23 +1534,33 @@
     };
   }
 
-  function versusStrip(games) {
+  function weekStat(label, value, title, gold) {
+    const cls = gold ? ' class="gold"' : '';
+    return `<span class="week-stat" title="${esc(title)}">${esc(label)} <strong${cls}>${esc(value)}</strong></span>`;
+  }
+
+  function weekBar(games) {
+    const strip = myWeekStrip(games);
     const board = gradeWeekVersus(games, Boolean((state.week && state.week.user) || (state.bootstrap && state.bootstrap.user)));
+    const bits = [
+      weekStat('Season points', fmtInt(strip.season), 'Season points from settled wagers', true),
+      weekStat('Week points', fmtInt(strip.week), 'Points scored on this week’s settled wagers', false),
+      weekStat('Open picks', fmtInt(strip.locks), 'Games you have a wager on that are still open before kickoff', false)
+    ];
     if (!board.signedIn) {
-      return `<p class="vs-strip muted" title="Sign in to compare your graded ATS, over/under, and outright results with the AI for this week">Sign in to compare your week with the AI.</p>`;
+      bits.push('<span class="week-note" title="Sign in to compare your graded ATS, over/under, and outright results with the AI for this week">Sign in to compare your week with the AI.</span>');
+    } else {
+      const you = board.user;
+      const ai = board.ai;
+      bits.push(weekStat('Your ATS', recordLabel(you.ats), 'Your graded against-the-spread record this week (W-L, or W-L-T with a push)', false));
+      bits.push(weekStat('AI ATS', recordLabel(ai.ats), 'AI graded against-the-spread record this week (W-L, or W-L-T with a push)', false));
+      bits.push(weekStat('Your O/U', recordLabel(you.ou), 'Your graded over/under record this week (W-L, or W-L-T with a push)', false));
+      bits.push(weekStat('AI O/U', recordLabel(ai.ou), 'AI graded over/under record this week (W-L, or W-L-T with a push)', false));
+      if (you.outright && you.outright.graded) {
+        bits.push(weekStat('Your outright', recordLabel(you.outright), 'Your graded outright record this week (W-L, or W-L-T with a tie)', false));
+      }
     }
-    const you = board.user;
-    const ai = board.ai;
-    const outright = you.outright && you.outright.graded
-      ? `<span>You outright <b>${esc(recordLabel(you.outright))}</b></span>`
-      : '';
-    return `<div class="vs-strip" title="Your graded wagers this week versus the AI. Records are W-L, or W-L-T when a tie or push is included.">
-      <span>You ATS <b>${esc(recordLabel(you.ats))}</b></span>
-      <span>AI ATS <b>${esc(recordLabel(ai.ats))}</b></span>
-      <span>You O/U <b>${esc(recordLabel(you.ou))}</b></span>
-      <span>AI O/U <b>${esc(recordLabel(ai.ou))}</b></span>
-      ${outright}
-    </div>`;
+    return `<div class="week-bar" title="Season points, this week’s points, open wagers, and graded results versus the AI">${bits.join('')}</div>`;
   }
 
   function myWeekStrip(games) {
@@ -1587,7 +1626,6 @@
     const w = state.week || state.bootstrap;
     const all = [...(w.games || [])].sort(compareWeekCards);
     const games = all.filter(passFilters);
-    const strip = myWeekStrip(all);
     const emptyMsg = all.length
       ? '<p>No games match those filters.</p>'
       : `<p class="notice">No games scheduled for week ${esc(w.week)} yet. Import schedule/lines for that week (npm run import / cron) so advance picks can load here.</p>`;
@@ -1595,12 +1633,7 @@
       <div class="week-hero">
         <div class="week-pill">WEEK ${esc(w.week)}</div>
       </div>
-      <div class="week-stats">
-        <div>Season pts <strong class="gold">${fmtInt(strip.season)}</strong></div>
-        <div>This week <strong>${fmtInt(strip.week)}</strong></div>
-        <div>Locks at kickoff <strong>${fmtInt(strip.locks)}</strong></div>
-      </div>
-      ${versusStrip(all)}
+      ${weekBar(all)}
       ${abbrevKey()}
       <div class="filters">
         ${weekPicker(w)}
@@ -2003,14 +2036,80 @@
     return `<span class="expected-hit ${esc(v)}">${esc(v)}</span>`;
   }
 
+  const BT_FILTER_COLS = [
+    { filter: 'team', key: 'team', label: 'Team', title: 'Focus team abbreviation for this matching row' },
+    { filter: 'site', key: 'site', label: 'Site', title: 'Home or road for the focus team' },
+    { filter: 'travel', key: 'travel', label: 'Travel', title: 'Road travel direction. n/a when the focus team is not on a cross-country road trip' },
+    { filter: 'distance', key: 'distanceLabel', label: 'Distance', title: 'Timezone distance traveled' },
+    { filter: 'roof', key: 'roofLabel', label: 'Roof', title: 'Dome, outdoor, or retractable' },
+    { filter: 'role', key: 'role', label: 'Role', title: 'Favorite or underdog from the closing spread' },
+    { filter: 'division', key: 'divisionalLabel', label: 'Division', title: 'Same-division opponent (Y/N)' },
+    { filter: 'daysOff', key: 'restBucket', label: 'Days off', title: 'Rest bucket: short, normal, or bye' },
+    { filter: 'spread', key: 'spreadBucket', label: 'Spread size', title: 'Absolute closing spread bucket: pick, small, medium, or large' },
+    { filter: 'total', key: 'totalBucket', label: 'Total bucket', title: 'Closing total bucket: low, mid, or high' },
+    { filter: 'timeOfDay', key: 'timeOfDay', label: 'Time of day', title: 'Kickoff window in America/New_York: morning, early, afternoon, or primetime' }
+  ];
+  const BT_FILTER_LABELS = {
+    site: { home: 'Home', road: 'Road', neutral: 'Neutral', matchup: 'Matchup' },
+    travel: { east: 'East', west: 'West' },
+    role: { favorite: 'Favorite', underdog: 'Underdog' },
+    restBucket: { short: 'Short', normal: 'Normal', bye: 'Bye+' },
+    spreadBucket: { pick: 'Pick’em', small: 'Small', medium: 'Medium', large: 'Large' },
+    totalBucket: { low: 'Low', mid: 'Mid', high: 'High' },
+    timeOfDay: { morning: 'Morning', early: 'Early', afternoon: 'Afternoon', primetime: 'Primetime' }
+  };
+
+  function activeBacktestFilterKeys() {
+    const keys = new Set();
+    for (const col of BT_FILTER_COLS) {
+      if (String(state.backtestFilters[col.filter]) !== String(DEFAULT_BT[col.filter])) keys.add(col.filter);
+    }
+    for (const step of state.backtestChain || []) {
+      if (!step || !step.dim || step.value == null || step.value === '' || step.value === 'all') continue;
+      const mapped = step.dim === 'rest' ? 'daysOff' : step.dim;
+      if (BT_FILTER_COLS.some((col) => col.filter === mapped)) keys.add(mapped);
+    }
+    return keys;
+  }
+
+  function backtestFilterValue(row, key) {
+    const raw = row ? row[key] : null;
+    if (raw == null || raw === '' || raw === 'none' || raw === 'unknown') return 'n/a';
+    const map = BT_FILTER_LABELS[key];
+    if (map && map[raw]) return map[raw];
+    return String(raw);
+  }
+
+  function backtestCell(r, key) {
+    if (key === 'gameDate') return esc(r.gameDate || '—');
+    if (key === 'opponent') return esc(r.matchup || `${r.away_team} @ ${r.home_team}`);
+    if (key === 'spreadLabel') return esc(r.spreadLabel || '—');
+    if (key === 'total_line') return esc(r.total_line == null || r.total_line === '' ? '—' : r.total_line);
+    if (key === 'restDays') return esc(r.restDays == null ? '—' : r.restDays);
+    if (key === 'weatherLabel') return esc(r.weatherLabel || '—');
+    if (key === 'coverLabel') return esc(r.coverLabel || '—');
+    if (key === 'ou') return esc(r.ou || '—');
+    if (key === 'expected') return esc(r.expected || '—');
+    if (key === 'confidence') return r.confidence != null ? `${esc(r.confidence)}%` : '—';
+    if (key === 'ouConfidence') return r.ouConfidence != null ? `${esc(r.ouConfidence)}%` : '—';
+    if (key === 'expectedAtsHit') return hitCell(r.expectedAtsHit);
+    if (key === 'expectedOuHit') return hitCell(r.expectedOuHit);
+    return esc(backtestFilterValue(r, key));
+  }
+
   function backtestGamesTable(rows) {
-    const cols = [
+    const base = [
       { key: 'gameDate', label: 'Date', title: 'Kickoff in America/New_York as YYYY-MM-DD HH:MM EST (literal EST suffix)' },
       { key: 'opponent', label: 'Matchup', title: 'Away and home team abbreviations (AWAY @ HOME)' },
       { key: 'spreadLabel', label: 'Spread', title: 'Closing spread for the focus team (or home-favored line)' },
       { key: 'total_line', label: 'Total', title: 'Closing total' },
       { key: 'restDays', label: 'Days rest', title: 'Days of rest for the focus team before this game' },
-      { key: 'weatherLabel', label: 'Weather', title: 'Weather / roof conditions' },
+      { key: 'weatherLabel', label: 'Weather', title: 'Weather / roof conditions' }
+    ];
+    // Every active filter gets a column, even when a row’s value is n/a.
+    const active = activeBacktestFilterKeys();
+    const filterCols = BT_FILTER_COLS.filter((col) => active.has(col.filter));
+    const tail = [
       { key: 'coverLabel', label: 'Cover', title: 'Spread cover (C), fail (F), or push (P)' },
       { key: 'ou', label: 'OU', title: 'Over/under result (O, U, or P)' },
       { key: 'expected', label: 'Expected', title: 'AI expected call (ATS or moneyline side, and Over/Under)' },
@@ -2019,6 +2118,7 @@
       { key: 'expectedAtsHit', label: 'ATS hit', title: 'Whether the expected ATS call hit (W, L, or P)' },
       { key: 'expectedOuHit', label: 'OU hit', title: 'Whether the expected over/under call hit (W, L, or P)' }
     ];
+    const cols = base.concat(filterCols, tail);
     const sorted = sortedBacktestGames(rows);
     const { key, dir } = state.backtestSort;
     return `<div class="hist-table-wrap"><table class="hist-table hist-games">
@@ -2027,21 +2127,7 @@
         const caret = on ? `<span class="caret">${dir === 'asc' ? '▲' : '▼'}</span>` : '';
         return `<th data-bt-sort="${c.key}" title="${esc(c.title)}" class="${on ? 'sorted' : ''}">${c.label}${caret}</th>`;
       }).join('')}</tr></thead>
-      <tbody>${sorted.map((r) => `<tr>
-        <td>${esc(r.gameDate || '')}</td>
-        <td>${esc(r.matchup || `${r.away_team} @ ${r.home_team}`)}</td>
-        <td>${esc(r.spreadLabel || '—')}</td>
-        <td>${esc(r.total_line == null ? '—' : r.total_line)}</td>
-        <td>${esc(r.restDays == null ? '—' : r.restDays)}</td>
-        <td>${esc(r.weatherLabel || '—')}</td>
-        <td>${esc(r.coverLabel || '—')}</td>
-        <td>${esc(r.ou || '—')}</td>
-        <td>${esc(r.expected || '—')}</td>
-        <td>${r.confidence != null ? `${esc(r.confidence)}%` : '—'}</td>
-        <td>${r.ouConfidence != null ? `${esc(r.ouConfidence)}%` : '—'}</td>
-        <td>${hitCell(r.expectedAtsHit)}</td>
-        <td>${hitCell(r.expectedOuHit)}</td>
-      </tr>`).join('')}</tbody>
+      <tbody>${sorted.map((r) => `<tr>${cols.map((c) => `<td>${backtestCell(r, c.key)}</td>`).join('')}</tr>`).join('')}</tbody>
     </table></div>`;
   }
 

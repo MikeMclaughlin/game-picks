@@ -614,7 +614,7 @@ function guardSides(game, projection, atsTeam) {
       atsNote = `moneyline only — ${team} +${shown} is not an ATS pick`;
     } else {
       atsMarket = 'pass';
-      atsNote = `pass ATS — ${team} +${shown} is too big a dog`;
+      atsNote = `pass ATS — ${team} +${shown}`;
     }
     team = null;
   }
@@ -918,7 +918,10 @@ function aiPick(game, projection, options = {}) {
   const ml = sides.mlTeam ? `${sides.mlTeam} ML` : null;
   const atsConfidence = rawAts == null ? null : displayConfidence(rawAts, map);
   let ouText = null;
-  if (totalGuard.ou && total != null) ouText = `take the ${totalGuard.ou} ${total}`;
+  if (totalGuard.ou && total != null) {
+    const word = totalGuard.ou === 'under' ? 'UNDER' : 'OVER';
+    ouText = `take the ${word} ${total}`;
+  }
   const sideText = ats || ml || (sides.atsMarket === 'pass' ? sides.atsNote : null);
   const totalText = ouText || totalGuard.ouNote;
   return {

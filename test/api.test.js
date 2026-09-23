@@ -115,6 +115,7 @@ test('/api/bootstrap returns JSON week payload', async () => {
     assert.equal(Object.prototype.hasOwnProperty.call(g, 'spread_open'), true);
     assert.equal(Object.prototype.hasOwnProperty.call(g, 'total_open'), true);
     assert.equal(Object.prototype.hasOwnProperty.call(g, 'live'), true);
+    assert.ok(Array.isArray(g.injuries));
     if (g.spread_line != null) {
       assert.equal(g.spreadMove.moved, false);
       assert.equal(g.spreadMove.deltaLabel, 'flat');
@@ -240,7 +241,22 @@ test('/api/history supports filter query params', async () => {
   assert.match(script, /Moved lines only/);
   assert.match(script, /Time of Day/);
   assert.match(script, /data-week-select/);
-  assert.match(script, /vs-strip/);
+  assert.match(script, /week-bar/);
+  assert.match(script, /function weekBar/);
+  assert.match(script, /Season points/);
+  assert.match(script, /Your ATS/);
+  assert.match(script, /injury-strip/);
+  assert.match(script, /function injuryHtml/);
+  assert.match(script, /Frozen at lock/);
+  assert.match(script, /function formatAiLine/);
+  assert.match(script, /ou-word/);
+  assert.match(script, /activeBacktestFilterKeys/);
+  assert.match(script, /Every active filter gets a column/);
+  assert.match(script, /userButtonOuterIdentifier/);
+  assert.match(script, /showName: false/);
+  assert.doesNotMatch(script, /class="week-stats"/);
+  assert.doesNotMatch(script, /class="vs-strip"/);
+  assert.doesNotMatch(script, /too big a dog/);
   assert.match(script, /nav-toggle/);
   assert.match(page, /id="nav-toggle"/);
   assert.match(script, /card-foot/);
@@ -338,6 +354,11 @@ test('/api/history supports filter query params', async () => {
   assert.match(cssText, /\.card\.slot-sat \{ --card-top: #4a4a4a; --card-bot: #363636; \}/);
   assert.match(cssText, /\.card\.slot-mon \{ --card-top: #2d2d2d; --card-bot: #1c1c1c; \}/);
   assert.match(cssText, /\.bt-stats \{/);
+  assert.match(cssText, /grid-template-columns: repeat\(8, minmax\(0, 1fr\)\)/);
+  assert.match(cssText, /\.week-bar \{/);
+  assert.match(cssText, /\.injury-strip \{/);
+  assert.match(cssText, /\.ai span\.ai-frozen/);
+  assert.match(cssText, /cl-userButtonOuterIdentifier/);
   assert.match(cssText, /background: #FFB81C/);
   assert.match(cssText, /\.bt-stat \.v \{ color: #111;/);
   assert.match(cssText, /\.hist-row label\.on select/);

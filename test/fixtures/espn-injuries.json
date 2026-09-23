@@ -1,0 +1,79 @@
+{
+  "injuries": [
+    {
+      "id": "26",
+      "displayName": "Seattle Seahawks",
+      "injuries": [
+        {
+          "status": "Questionable",
+          "athlete": {
+            "displayName": "Sam Darnold",
+            "position": { "abbreviation": "QB" },
+            "team": { "abbreviation": "SEA" }
+          }
+        },
+        {
+          "status": "Questionable",
+          "athlete": {
+            "displayName": "Jaxon Smith-Njigba",
+            "position": { "abbreviation": "WR" },
+            "team": { "abbreviation": "SEA" }
+          }
+        },
+        {
+          "status": "Active",
+          "athlete": {
+            "displayName": "Kenneth Walker III",
+            "position": { "abbreviation": "RB" },
+            "team": { "abbreviation": "SEA" }
+          }
+        }
+      ]
+    },
+    {
+      "id": "28",
+      "displayName": "Washington Commanders",
+      "injuries": [
+        {
+          "status": "Doubtful",
+          "athlete": {
+            "displayName": "Jayden Daniels",
+            "position": { "abbreviation": "QB" },
+            "team": { "abbreviation": "WSH" }
+          }
+        },
+        {
+          "status": "Out",
+          "athlete": {
+            "displayName": "Example Tackle",
+            "position": { "abbreviation": "OT" },
+            "team": { "abbreviation": "WSH" }
+          }
+        },
+        {
+          "status": "Injured Reserve",
+          "athlete": {
+            "displayName": "Example Reserve",
+            "position": { "abbreviation": "CB" },
+            "team": { "abbreviation": "WSH" }
+          }
+        }
+      ]
+    },
+    {
+      "id": "3",
+      "displayName": "Chicago Bears",
+      "injuries": [
+        {
+          "status": "Questionable",
+          "type": { "abbreviation": "Q", "description": "questionable" },
+          "athlete": {
+            "displayName": "Caleb Williams",
+            "position": { "name": "Quarterback" },
+            "team": { "abbreviation": "CHI" }
+          }
+        }
+      ]
+    }
+  ]
+}

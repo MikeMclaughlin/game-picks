@@ -413,6 +413,8 @@ test('expected call label and confidence stay in documented bounds', () => {
     sampleN: 40
   });
   assert.equal(pick.expected, 'BUF -5.5 and Over');
+  assert.match(pick.label, /OVER/);
+  assert.doesNotMatch(pick.label, /too big a dog/);
   assert.equal(typeof pick.confidence, 'number');
   assert.equal(pick.confidence, pick.atsConfidence);
   assert.equal(typeof pick.ouConfidence, 'number');
@@ -695,7 +697,9 @@ test('huge dogs are not the gold ATS pick', () => {
   );
   assert.equal(pass.atsMarket, 'pass');
   assert.equal(pass.ml, null);
-  assert.match(pass.atsNote, /too big a dog/);
+  assert.match(pass.atsNote, /pass ATS/);
+  assert.match(pass.atsNote, /\+13\.5/);
+  assert.doesNotMatch(pass.atsNote, /too big a dog/);
 
   const homeDog = aiPick(
     { home_team: 'ARI', away_team: 'SEA', spread_line: -12, total_line: 44, weekday: 'Sunday' },
