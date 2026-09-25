@@ -1171,7 +1171,7 @@
 
   function cardExpanded(game) {
     if (cardOpen.has(game.game_id)) return cardOpen.get(game.game_id);
-    return cardPhase(game) !== 'final';
+    return false;
   }
 
   function formatLineText(n) {
@@ -1273,6 +1273,28 @@
     }
     if (!bits.length) return '';
     return `<div class="settle-strip" title="Closing spread and total: ATS colored by whether the favorite covered (green/red); O/U stays neutral">${bits.join(' ')}</div>`;
+  }
+
+  // Favorite, spread, and OVER/UNDER stay visible on a collapsed card that is not final.
+  function collapsedLineHtml(game) {
+    const bits = [];
+    const line = spreadLabel(game);
+    if (line !== '—') {
+      if (line === 'PICK') {
+        bits.push('<span><b>Favorite</b> Pick’em</span>');
+      } else {
+        const spread = Number(game.spread_line);
+        const fav = spread > 0 ? game.home_team : game.away_team;
+        bits.push(`<span><b>Favorite</b> ${esc(fav)}</span>`);
+      }
+      bits.push(`<span><b>Spread</b> ${esc(line)}</span>`);
+    }
+    const total = fmtNum(game.total_line);
+    if (total !== '—') {
+      bits.push(`<span><b class="ou-word">OVER/UNDER</b> ${esc(total)}</span>`);
+    }
+    if (!bits.length) return '';
+    return `<div class="line-peek" title="Favorite, spread, and over/under">${bits.join(' ')}</div>`;
   }
 
   function scoreRow(game) {
@@ -1444,8 +1466,8 @@
         </div>
       </div>
       ${scoreRow(game)}
-      ${phase === 'final' ? settleHtml(game) : ''}
-      <button type="button" class="details-toggle" data-details="${esc(game.game_id)}" title="Show or hide team stats, the AI pick, and pick buttons">${expanded ? '▲ HIDE' : '▼ DETAILS'}</button>
+      ${phase === 'final' ? settleHtml(game) : (expanded ? '' : collapsedLineHtml(game))}
+      <button type="button" class="details-toggle" data-details="${esc(game.game_id)}" aria-expanded="${expanded ? 'true' : 'false'}" aria-label="${expanded ? 'Hide' : 'Info'}" title="Show or hide team stats, the AI pick, and pick buttons">${expanded ? '▲ HIDE' : '▼ INFO'}</button>
       <div class="card-details"${expanded ? '' : ' hidden'}>
         ${cardStatRows(game)}
         <div class="card-foot">
@@ -1650,6 +1672,19 @@
     return String((a && a.home_team) || '').localeCompare(String((b && b.home_team) || ''));
   }
 
+  function allCardsCollapsed(games) {
+    return !(games || []).some((g) => cardExpanded(g));
+  }
+
+  function toggleAllButton(games) {
+    const collapsed = allCardsCollapsed(games);
+    const label = collapsed ? 'Expand all' : 'Collapse all';
+    const title = collapsed
+      ? 'Show stats, the AI pick, and pick buttons on every card.'
+      : 'Hide stats, the AI pick, and pick buttons on every card.';
+    return `<button type="button" class="chip" data-toggle-all aria-expanded="${collapsed ? 'false' : 'true'}" aria-label="${esc(label)}" title="${esc(title)}">${label}</button>`;
+  }
+
   function weekView() {
     const w = state.week || state.bootstrap;
     const all = [...(w.games || [])].sort(compareWeekCards);
@@ -1662,16 +1697,16 @@
         <div class="week-pill">WEEK ${esc(w.week)}</div>
       </div>
       ${weekBar(all)}
-      ${abbrevKey()}
       <div class="filters">
         ${weekPicker(w)}
         <button type="button" class="chip${state.filters.homeDog ? ' on' : ''}" data-filter="homeDog" title="Show home underdogs only">Home underdogs</button>
         <button type="button" class="chip${state.filters.projOver ? ' on' : ''}" data-filter="projOver" title="Show games projected over the total">Projected over</button>
         <button type="button" class="chip${state.filters.projUnder ? ' on' : ''}" data-filter="projUnder" title="Show games projected under the total">Projected under</button>
         <button type="button" class="chip${state.filters.movedLines ? ' on' : ''}" data-filter="movedLines" title="Show only games whose spread or total has moved from the opening line">Moved lines only</button>
-        <button type="button" class="chip" data-toggle-all title="Hide stats, the AI pick, and pick buttons on every card. If they are all hidden, show them.">Toggle All</button>
+        ${toggleAllButton(games)}
       </div>
       <div class="cards week-cards" id="week-cards">${games.map(card).join('') || emptyMsg}</div>
+      ${abbrevKey()}
     </section>`;
   }
 
@@ -2212,10 +2247,10 @@
     return `<section>
       <h1>Backtest</h1>
       <p class="lede">Markov-style slices over stored games (2016+) · server-side aggregation</p>
-      ${abbrevKey()}
       ${backtestFiltersForm()}
       ${chainBuilder()}
       ${body}
+      ${abbrevKey()}
     </section>`;
   }
 
@@ -2237,9 +2272,9 @@
     return `<section>
       <h1>History</h1>
       <p class="lede">Team performance splits · schedule seed (not your wager ledger)</p>
-      ${abbrevKey()}
       ${historyFiltersForm()}
       ${body}
+      ${abbrevKey()}
     </section>`;
   }
 

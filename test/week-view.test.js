@@ -626,16 +626,16 @@ test('week cards sort by kickoff then home team', () => {
   assert.deepEqual(ordered.map((g) => g.home_team), ['DAL', 'BUF', 'SEA', 'KC']);
 });
 
-test('final cards collapse by default and live cards stay open', () => {
+test('cards collapse by default on load', () => {
   const finalGame = { home_score: 20, away_score: 17, locked: true };
   const liveGame = { locked: true, live: { state: 'in', home_score: 7, away_score: 3 } };
   const openGame = { locked: false, home_score: null, away_score: null };
   assert.equal(cardPhase(finalGame), 'final');
   assert.equal(defaultExpanded(finalGame), false);
   assert.equal(cardPhase(liveGame), 'live');
-  assert.equal(defaultExpanded(liveGame), true);
+  assert.equal(defaultExpanded(liveGame), false);
   assert.equal(cardPhase(openGame), 'pre');
-  assert.equal(defaultExpanded(openGame), true);
+  assert.equal(defaultExpanded(openGame), false);
 });
 
 test('week versus counts pushes in W-L-T and skips a signed-out user record', () => {
