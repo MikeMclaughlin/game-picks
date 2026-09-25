@@ -205,3 +205,42 @@ test('parseBacktestFilters adds spread and total buckets', () => {
   assert.equal(f.total, 'high');
   assert.equal(f.team, 'SEA');
 });
+
+test('starter out filter and chain use the nflverse injury index', () => {
+  const injuryIndex = {
+    seasons: new Set([2024]),
+    qbOut: new Set(['2024|REG|1|MIA'])
+  };
+  const games = [
+    game({ game_id: 'out', week: 1, home_team: 'BUF', away_team: 'MIA' }),
+    game({
+      game_id: 'active',
+      week: 2,
+      kickoff: '2024-09-15T17:00:00Z',
+      home_team: 'BUF',
+      away_team: 'NE'
+    })
+  ];
+  const filters = parseBacktestFilters({ from: 2024, to: 2024, starterOut: 'yes' });
+  assert.equal(filters.starterOut, 'out');
+  const sliced = backtestPayload(games, { filters, injuryIndex });
+  assert.equal(sliced.n, 1);
+  assert.equal(sliced.games[0].team, 'MIA');
+  assert.equal(sliced.games[0].starterOut, 'out');
+  const csv = backtestCsv(sliced);
+  assert.match(csv, /starter_out/);
+  assert.match(csv, /,out\n/);
+
+  const chained = backtestPayload(games, {
+    filters: parseBacktestFilters({ team: 'BUF', from: 2024, to: 2024 }),
+    chain: parseChain('starterOut:active'),
+    injuryIndex
+  });
+  assert.equal(chained.n, 2);
+  assert.ok(chained.games.every((row) => row.starterOut === 'active'));
+
+  const missing = backtestPayload(games, {
+    filters: parseBacktestFilters({ from: 2024, to: 2024, starterOut: 'out' })
+  });
+  assert.equal(missing.n, 0);
+});

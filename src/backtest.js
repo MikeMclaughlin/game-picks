@@ -27,6 +27,7 @@ const {
   totalBucket
 } = require('./history');
 const { timeOfDayBucket } = require('./kickoff-slot');
+const { starterOutState } = require('./nflverse-injuries');
 
 const SMALL_N = 30;
 const CSV_GAME_CAP = 8000;
@@ -34,7 +35,8 @@ const CSV_GAME_CAP = 8000;
 const EXTRA_DEFAULTS = {
   spread: 'all',
   total: 'all',
-  timeOfDay: 'all'
+  timeOfDay: 'all',
+  starterOut: 'all'
 };
 
 const CHAIN_DIMS = [
@@ -51,7 +53,8 @@ const CHAIN_DIMS = [
   { dim: 'roof', label: 'Roof', values: ['dome', 'outdoor', 'retractable'] },
   { dim: 'travel', label: 'Travel', values: ['east', 'west'] },
   { dim: 'distance', label: 'Distance', values: ['local', 'cross'] },
-  { dim: 'timeOfDay', label: 'Time of day', values: ['morning', 'early', 'afternoon', 'primetime'] }
+  { dim: 'timeOfDay', label: 'Time of day', values: ['morning', 'early', 'afternoon', 'primetime'] },
+  { dim: 'starterOut', label: 'Starter out', values: ['out', 'active'] }
 ];
 
 const DIM_SET = new Set(CHAIN_DIMS.map((d) => d.dim));
@@ -77,6 +80,16 @@ const VALUE_ALIASES = {
     primetime: 'primetime',
     prime: 'primetime',
     'prime-time': 'primetime'
+  },
+  starterOut: {
+    out: 'out',
+    active: 'active',
+    in: 'active',
+    clear: 'active',
+    none: 'active',
+    yes: 'out',
+    'starter-out': 'out',
+    starterout: 'out'
   }
 };
 
@@ -105,8 +118,15 @@ function parseBacktestFilters(searchParams, extras = {}) {
   return {
     ...base,
     spread: aliasValue('spread', get('spread')) || EXTRA_DEFAULTS.spread,
-    total: aliasValue('total', get('total')) || EXTRA_DEFAULTS.total
+    total: aliasValue('total', get('total')) || EXTRA_DEFAULTS.total,
+    starterOut: acceptedStarterOut(get('starterOut') || get('starter_out'))
   };
+}
+
+function acceptedStarterOut(raw) {
+  const aliased = aliasValue('starterOut', raw);
+  if (aliased === 'out' || aliased === 'active') return aliased;
+  return EXTRA_DEFAULTS.starterOut;
 }
 
 function parseChain(input) {
@@ -140,6 +160,7 @@ function parseChain(input) {
     if (!DIM_SET.has(dim)) continue;
     const normalized = aliasValue(dim, value);
     if (!normalized) continue;
+    if (dim === 'starterOut' && normalized !== 'out' && normalized !== 'active') continue;
     steps.push({ dim, value: normalized });
   }
   return steps;
@@ -206,7 +227,7 @@ function lastFiveFromPrior(prior, team, letterFn) {
   return letters.reverse().join('-');
 }
 
-function stateValue(game, team, dim, index) {
+function stateValue(game, team, dim, index, injuryIndex) {
   const prior = (dim === 'lastGame' || dim === 'last5wl' || dim === 'last5ats')
     ? priorGames(index, team, game.kickoff)
     : null;
@@ -241,6 +262,7 @@ function stateValue(game, team, dim, index) {
     return distanceBucket(game.away_team, game.home_team);
   }
   if (dim === 'timeOfDay') return timeOfDayBucket(game);
+  if (dim === 'starterOut') return starterOutState(game, team, injuryIndex);
   return null;
 }
 
@@ -251,7 +273,7 @@ function matchesExtraFilters(game, filters) {
 }
 
 function hasTeamRelativeConstraint(filters, chain) {
-  const teamKeys = ['site', 'travel', 'distance', 'role', 'daysOff'];
+  const teamKeys = ['site', 'travel', 'distance', 'role', 'daysOff', 'starterOut'];
   for (const key of teamKeys) {
     if (filters[key] && filters[key] !== 'all') return true;
   }
@@ -406,7 +428,8 @@ const CSV_HEADERS = [
   'confidence',
   'ou_confidence',
   'expected_ats_hit',
-  'expected_ou_hit'
+  'expected_ou_hit',
+  'starter_out'
 ];
 
 function toCsv(rows) {
@@ -440,14 +463,15 @@ function toCsv(rows) {
       confidence: row.confidence,
       ou_confidence: row.ouConfidence,
       expected_ats_hit: row.expectedAtsHit,
-      expected_ou_hit: row.expectedOuHit
+      expected_ou_hit: row.expectedOuHit,
+      starter_out: row.starterOut
     };
     lines.push(CSV_HEADERS.map((h) => csvEscape(rec[h])).join(','));
   }
   return `${lines.join('\n')}\n`;
 }
 
-function enrichObservation(obs, index) {
+function enrichObservation(obs, index, injuryIndex) {
   const { game, team, pick, expectedGrade } = obs;
   const log = gameLogRow(game, team);
   const restDays = game.home_team === team ? toNumber(game.home_rest) : toNumber(game.away_rest);
@@ -472,7 +496,8 @@ function enrichObservation(obs, index) {
     home_rest: toNumber(game.home_rest),
     restDays,
     restBucket: restBucket(restDays),
-    travel: stateValue(game, team, 'travel', index),
+    travel: stateValue(game, team, 'travel', index, injuryIndex),
+    starterOut: starterOutState(game, team, injuryIndex),
     timeOfDay: timeOfDayBucket(game),
     spreadBucket: spreadAbsBucket(game),
     totalBucket: totalBucket(game),
@@ -504,7 +529,7 @@ function enrichObservation(obs, index) {
   };
 }
 
-function collectObservations(games, filters, chain, index) {
+function collectObservations(games, filters, chain, index, injuryIndex) {
   const out = [];
   for (const game of games) {
     if (!scoresReady(game)) continue;
@@ -513,9 +538,10 @@ function collectObservations(games, filters, chain, index) {
     const teams = focusTeams(game, filters, chain);
     for (const team of teams) {
       if (!matchesTeamFilters(game, team, filters)) continue;
+      if (!matchesStarterOut(game, team, filters, injuryIndex)) continue;
       let ok = true;
       for (const step of chain) {
-        if (stateValue(game, team, step.dim, index) !== step.value) {
+        if (stateValue(game, team, step.dim, index, injuryIndex) !== step.value) {
           ok = false;
           break;
         }
@@ -525,6 +551,17 @@ function collectObservations(games, filters, chain, index) {
     }
   }
   return out;
+}
+
+function matchesStarterOut(game, team, filters, injuryIndex) {
+  const want = filters && filters.starterOut;
+  if (!want || want === 'all') return true;
+  return starterOutState(game, team, injuryIndex) === want;
+}
+
+function wantsInjurySlice(filters, chain) {
+  if (filters && filters.starterOut && filters.starterOut !== 'all') return true;
+  return (chain || []).some((step) => step && step.dim === 'starterOut');
 }
 
 function yearOnlyFilters(filters) {
@@ -605,10 +642,10 @@ function expectedSummary(obs) {
   };
 }
 
-function chainPath(games, filters, chain, index) {
+function chainPath(games, filters, chain, index, injuryIndex) {
   const path = [];
   const yearFilters = yearOnlyFilters(filters);
-  const yearObs = collectObservations(games, yearFilters, [], index);
+  const yearObs = collectObservations(games, yearFilters, [], index, injuryIndex);
   path.push({
     step: 0,
     label: 'League (year range)',
@@ -618,7 +655,7 @@ function chainPath(games, filters, chain, index) {
     uniqueGames: uniqueGames(yearObs),
     stats: summarize(yearObs)
   });
-  const sliceObs = collectObservations(games, filters, [], index);
+  const sliceObs = collectObservations(games, filters, [], index, injuryIndex);
   path.push({
     step: 1,
     label: 'Filtered slice',
@@ -631,7 +668,7 @@ function chainPath(games, filters, chain, index) {
   let applied = [];
   for (let i = 0; i < chain.length; i += 1) {
     applied = applied.concat(chain[i]);
-    const matched = collectObservations(games, filters, applied, index);
+    const matched = collectObservations(games, filters, applied, index, injuryIndex);
     path.push({
       step: i + 2,
       label: `${chain[i].dim}:${chain[i].value}`,
@@ -675,19 +712,20 @@ function backtestPayload(games, options = {}) {
     ...(options.filters || {})
   };
   const chain = parseChain(options.chain || []);
+  const injuryIndex = options.injuryIndex || null;
   const scored = (games || []).filter((g) => g.game_type !== 'PRE');
   fitCalibrationFromGames(scored);
   const index = indexByTeam(scored);
-  const leagueObs = collectObservations(scored, yearOnlyFilters(filters), [], index);
-  const peerObs = collectObservations(scored, teamYearFilters(filters), [], index);
-  const matched = collectObservations(scored, filters, chain, index);
+  const leagueObs = collectObservations(scored, yearOnlyFilters(filters), [], index, injuryIndex);
+  const peerObs = collectObservations(scored, teamYearFilters(filters), [], index, injuryIndex);
+  const matched = collectObservations(scored, filters, chain, index, injuryIndex);
   attachExpected(matched, scored);
   const slice = summarize(matched);
   const league = summarize(leagueObs);
   const peer = summarize(peerObs);
   const expected = expectedSummary(matched);
   const rows = matched
-    .map((o) => enrichObservation(o, index))
+    .map((o) => enrichObservation(o, index, injuryIndex))
     .sort((a, b) => String(b.gameDate).localeCompare(String(a.gameDate)) || String(a.game_id).localeCompare(String(b.game_id)));
   const seasons = [...new Set(scored.map((g) => Number(g.season)).filter(Number.isFinite))].sort((a, b) => a - b);
   return {
@@ -705,7 +743,7 @@ function backtestPayload(games, options = {}) {
     vsLeague: compareBlock(slice, league),
     vsPeer: compareBlock(slice, peer),
     expected,
-    path: chainPath(scored, filters, chain, index),
+    path: chainPath(scored, filters, chain, index, injuryIndex),
     games: rows.slice(0, CSV_GAME_CAP),
     truncated: rows.length > CSV_GAME_CAP,
     notes: {
@@ -719,6 +757,7 @@ function backtestPayload(games, options = {}) {
       spread: 'Spread size from |spread_line|: pick = 0, small ≤3, medium ≤6.5, large 7+.',
       total: 'Total bucket: low <42, mid 42–47.5, high ≥48.',
       timeOfDay: NOTES.timeOfDay,
+      starterOut: 'Starter out uses the nflverse-data injuries release (official weekly report_status). Out means a quarterback is listed Out for that team, season, week, and game type. Active means that season’s file is loaded and no QB is Out. A season that is not loaded is n/a and matches neither Out nor Active.',
       opponent: 'Away and home team abbreviations as AWAY @ HOME.',
       restDays: 'Days of rest for the focus team before this game.'
     },
@@ -743,5 +782,6 @@ module.exports = {
   toCsv,
   collectObservations,
   expectedCallAccuracy: expectedSummary,
+  wantsInjurySlice,
   EXTRA_DEFAULTS
 };

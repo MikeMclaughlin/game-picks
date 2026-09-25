@@ -86,7 +86,8 @@
       daysOff: 'all',
       spread: 'all',
       total: 'all',
-      timeOfDay: 'all'
+      timeOfDay: 'all',
+      starterOut: 'all'
     },
     backtestChain: [],
     backtestSort: { key: 'gameDate', dir: 'desc' }
@@ -109,7 +110,7 @@
     total: 'all',
     timeOfDay: 'all'
   };
-  const DEFAULT_BT = { ...DEFAULT_HIST };
+  const DEFAULT_BT = { ...DEFAULT_HIST, starterOut: 'all' };
   const LS_WEEK = 'game-picks:week:v1';
   const LS_HISTORY = 'game-picks:history:v1';
   const LS_BACKTEST = 'game-picks:backtest:v1';
@@ -127,7 +128,8 @@
     { dim: 'roof', label: 'Roof', options: [{ value: 'dome', label: 'Dome' }, { value: 'outdoor', label: 'Outdoor' }, { value: 'retractable', label: 'Retractable' }] },
     { dim: 'travel', label: 'Travel', options: [{ value: 'east', label: 'East' }, { value: 'west', label: 'West' }] },
     { dim: 'distance', label: 'Distance', options: [{ value: 'local', label: 'Local' }, { value: 'cross', label: 'Cross-country' }] },
-    { dim: 'timeOfDay', label: 'Time of day', options: [{ value: 'morning', label: 'Morning' }, { value: 'early', label: 'Early' }, { value: 'afternoon', label: 'Afternoon' }, { value: 'primetime', label: 'Primetime' }] }
+    { dim: 'timeOfDay', label: 'Time of day', options: [{ value: 'morning', label: 'Morning' }, { value: 'early', label: 'Early' }, { value: 'afternoon', label: 'Afternoon' }, { value: 'primetime', label: 'Primetime' }] },
+    { dim: 'starterOut', label: 'Starter out', options: [{ value: 'out', label: 'Out' }, { value: 'active', label: 'Active' }] }
   ];
   const FILTER_FIELDS = [
     { key: 'team', label: 'Team', title: 'Limit results to one team abbreviation. All includes every club.', row: 'primary', options: 'teams' },
@@ -143,7 +145,8 @@
     { key: 'daysOff', label: 'Days off', title: 'Short rest is 5 days or fewer, bye+ is 11 or more, otherwise normal', row: 'more', options: [{ value: 'all', label: 'All' }, { value: 'short', label: 'Short rest' }, { value: 'normal', label: 'Normal' }, { value: 'bye', label: 'Bye+' }] },
     { key: 'spread', label: 'Spread size', title: 'Absolute closing spread: pick’em is 0, small is 3 or under, medium is 6.5 or under, large is 7 or more', row: 'more', options: [{ value: 'all', label: 'All' }, { value: 'pick', label: 'Pick’em' }, { value: 'small', label: 'Small ≤3' }, { value: 'medium', label: 'Medium ≤6.5' }, { value: 'large', label: 'Large 7+' }] },
     { key: 'total', label: 'Total', title: 'Closing total: low is under 42, mid is 42 through 47.5, high is 48 or more', row: 'more', options: [{ value: 'all', label: 'All' }, { value: 'low', label: 'Low <42' }, { value: 'mid', label: 'Mid 42–47.5' }, { value: 'high', label: 'High ≥48' }] },
-    { key: 'timeOfDay', label: 'Time of Day', title: 'Kickoff in America/New_York. Morning is before 11:00, Early is 11:00 until 16:00, Afternoon is 16:00 until 19:00, Primetime is 19:00 or later.', row: 'more', options: [{ value: 'all', label: 'All' }, { value: 'morning', label: 'Morning' }, { value: 'early', label: 'Early' }, { value: 'afternoon', label: 'Afternoon' }, { value: 'primetime', label: 'Primetime' }] }
+    { key: 'timeOfDay', label: 'Time of Day', title: 'Kickoff in America/New_York. Morning is before 11:00, Early is 11:00 until 16:00, Afternoon is 16:00 until 19:00, Primetime is 19:00 or later.', row: 'more', options: [{ value: 'all', label: 'All' }, { value: 'morning', label: 'Morning' }, { value: 'early', label: 'Early' }, { value: 'afternoon', label: 'Afternoon' }, { value: 'primetime', label: 'Primetime' }] },
+    { key: 'starterOut', label: 'Starter out', title: 'Official weekly injury report from nflverse. Out means a quarterback is listed Out for the focus team that week. Active means that season’s report is loaded and no QB is Out.', row: 'more', page: 'backtest', options: [{ value: 'all', label: 'All' }, { value: 'out', label: 'Out' }, { value: 'active', label: 'Active' }] }
   ];
   const CHIP_META = [
     { key: 'team', label: 'Team' },
@@ -162,8 +165,10 @@
     { key: 'timeOfDay', label: 'Time of Day', names: { morning: 'Morning', early: 'Early', afternoon: 'Afternoon', primetime: 'Primetime' } }
   ];
   const HIST_CHIP_META = CHIP_META;
-  const BT_CHIP_META = CHIP_META;
-  const SECONDARY = new Set(['distance', 'roof', 'role', 'division', 'daysOff', 'spread', 'total', 'timeOfDay']);
+  const BT_CHIP_META = CHIP_META.concat([
+    { key: 'starterOut', label: 'Starter out', names: { out: 'Out', active: 'Active' } }
+  ]);
+  const SECONDARY = new Set(['distance', 'roof', 'role', 'division', 'daysOff', 'spread', 'total', 'timeOfDay', 'starterOut']);
   const SECONDARY_HIST = SECONDARY;
   const SECONDARY_BT = SECONDARY;
   let loadGen = 0;
@@ -276,7 +281,8 @@
       total: { medium: 'mid' },
       timeOfDay: { prime: 'primetime', 'prime-time': 'primetime' },
       weather: { wind: 'windy' },
-      travel: {}
+      travel: {},
+      starterOut: { out: 'out', active: 'active', in: 'active', clear: 'active', none: 'active', yes: 'out' }
     };
     const mapped = maps[key] && maps[key][v.toLowerCase()];
     return mapped || v;
@@ -722,7 +728,11 @@
 
   function backtestQuery(filters, chain) {
     const f = filters || state.backtestFilters;
-    const p = new URLSearchParams(historyQuery(f));
+    const p = new URLSearchParams();
+    for (const key of Object.keys(DEFAULT_BT)) {
+      if (f[key] == null || f[key] === '') continue;
+      p.set(key, String(f[key]));
+    }
     const steps = (chain || state.backtestChain || []).filter((s) => s && s.dim && s.value && s.value !== 'all');
     if (steps.length) p.set('chain', steps.map((s) => `${s.dim}:${s.value}`).join(','));
     return p.toString();
@@ -1348,9 +1358,30 @@
     startLivePoll();
   }
 
-  function confidenceBit(value, label, title) {
-    if (value == null || !Number.isFinite(Number(value))) return '';
-    return `<span class="ai-conf" title="${esc(title)}">${esc(label)} ${esc(String(Math.round(Number(value))))}% confidence</span>`;
+  function confidenceParts(pick) {
+    const atsConf = pick.atsConfidence != null ? pick.atsConfidence : (pick.ats || pick.atsTeam ? pick.confidence : null);
+    const ouConf = pick.ou ? pick.ouConfidence : null;
+    const parts = [];
+    if (atsConf != null && Number.isFinite(Number(atsConf))) {
+      parts.push({
+        text: `ATS ${Math.round(Number(atsConf))}%`,
+        title: 'Calibrated historical ATS hit rate (2016+ scored REG) for the ATS side only. The raw ATS edge/sample rule is mapped with isotonic reliability. This is not an O/U probability and not a joint ATS+O/U probability.'
+      });
+    }
+    if (ouConf != null && Number.isFinite(Number(ouConf))) {
+      parts.push({
+        text: `O/U ${Math.round(Number(ouConf))}%`,
+        title: 'O/U confidence: separate edge/sample score for the total only (51–92 rule). Not the ATS hit-rate map and not a joint ATS+O/U probability.'
+      });
+    }
+    return parts;
+  }
+
+  function confidenceLine(pick) {
+    const parts = confidenceParts(pick || {});
+    if (!parts.length) return '';
+    const bits = parts.map((part) => `<span class="ai-conf" title="${esc(part.title)}">${esc(part.text)}</span>`);
+    return `<div class="ai-conf-line">Conf. ${bits.join(' · ')}</div>`;
   }
 
   function formatAiLine(text) {
@@ -1382,20 +1413,7 @@
     const aiRaw = pick.label
       || pick.expected
       || '';
-    const atsConf = pick.atsConfidence != null ? pick.atsConfidence : (pick.ats || pick.atsTeam ? pick.confidence : null);
-    const confParts = [
-      confidenceBit(
-        atsConf,
-        'ATS',
-        'Calibrated historical ATS hit rate (2016+ scored REG) for the ATS side only. The raw ATS edge/sample rule is mapped with isotonic reliability. This is not an O/U probability and not a joint ATS+O/U probability.'
-      ),
-      confidenceBit(
-        pick.ou ? pick.ouConfidence : null,
-        'O/U',
-        'O/U confidence: separate edge/sample score for the total only (51–92 rule). Not the ATS hit-rate map and not a joint ATS+O/U probability.'
-      )
-    ].filter(Boolean);
-    const conf = confParts.length ? ` · ${confParts.join(' · ')}` : '';
+    const confLine = confidenceLine(pick);
     const extraNotes = [];
     if (pick.ats && pick.atsNote) extraNotes.push(pick.atsNote);
     if (pick.ou && pick.ouNote) extraNotes.push(pick.ouNote);
@@ -1432,7 +1450,7 @@
         ${cardStatRows(game)}
         <div class="card-foot">
           ${injuryHtml(game)}
-          ${aiRaw ? `<div class="ai"><span>AI Pick:</span> ${formatAiLine(aiRaw)}${conf}${frozenHtml}</div>${noteHtml}` : ''}
+          ${aiRaw ? `<div class="ai"><span>AI Pick:</span> ${formatAiLine(aiRaw)}${frozenHtml}${confLine}</div>${noteHtml}` : ''}
           <div class="picks">
             ${pickRow(game, 'outright', game.away_team, game.home_team, outrightPickLabel(game.away_team), outrightPickLabel(game.home_team))}
             ${pickRow(game, 'ats', game.away_team, game.home_team, atsPickLabel(game, game.away_team), atsPickLabel(game, game.home_team), {
@@ -1603,6 +1621,16 @@
       <span><b>xPts</b> expected points</span>
       <span><b>ATS</b> against the spread</span>
       <span><b>OU</b> over/under/push</span>
+    </p>
+    <p class="abbrev-key">
+      <span><b>TEAM +N / TEAM −N</b> ATS pick. Plus means that team is getting points. Minus means they are giving points (BUF −3.5 is Buffalo laying 3.5).</span>
+      <span><b>OVER / UNDER</b> the total. The line reads take the OVER or take the UNDER, then the number.</span>
+      <span><b>pass UNDER / pass OVER</b> no total pick. The reason after the dash can be TNF, total 50+, or both. This app writes pass UNDER for those spots.</span>
+      <span><b>under discounted</b> still an under, with lower confidence, for TNF or a total 50+.</span>
+      <span><b>pass ATS</b> no spread pick. Reasons include a big dog (TEAM +N), a small home dog that just allowed a pile of points, or a road favorite that lost its starter when the backup is not shown as the problem.</span>
+      <span><b>moneyline only</b> straight-up pick instead of ATS when the number is too big.</span>
+      <span><b>flag</b> the ATS pick stands, with a warning (fading a small home dog after a big points-allowed game).</span>
+      <span><b>TEAM ML</b> moneyline side, not a spread number.</span>
     </p>`;
   }
 
@@ -1641,6 +1669,7 @@
         <button type="button" class="chip${state.filters.projOver ? ' on' : ''}" data-filter="projOver" title="Show games projected over the total">Projected over</button>
         <button type="button" class="chip${state.filters.projUnder ? ' on' : ''}" data-filter="projUnder" title="Show games projected under the total">Projected under</button>
         <button type="button" class="chip${state.filters.movedLines ? ' on' : ''}" data-filter="movedLines" title="Show only games whose spread or total has moved from the opening line">Moved lines only</button>
+        <button type="button" class="chip" data-toggle-all title="Hide stats, the AI pick, and pick buttons on every card. If they are all hidden, show them.">Toggle All</button>
       </div>
       <div class="cards week-cards" id="week-cards">${games.map(card).join('') || emptyMsg}</div>
     </section>`;
@@ -1769,7 +1798,7 @@
     const moreOpen = moreFlag || chips.some((c) => SECONDARY.has(c.key));
     const teams = ['ALL', ...(state.bootstrap?.teams || [])];
     const years = historyPage ? yearsForHistory() : ((state.backtest && state.backtest.seasons) || yearsForHistory());
-    const fieldHtml = (row) => FILTER_FIELDS.filter((field) => field.row === row).map((field) => {
+    const fieldHtml = (row) => FILTER_FIELDS.filter((field) => field.row === row && (!field.page || field.page === which)).map((field) => {
       const options = field.options === 'teams' ? teams : field.options === 'years' ? years : field.options;
       return filterField(field.label, field.key, field.title, options, filters, defaults);
     }).join('');
@@ -2047,7 +2076,8 @@
     { filter: 'daysOff', key: 'restBucket', label: 'Days off', title: 'Rest bucket: short, normal, or bye' },
     { filter: 'spread', key: 'spreadBucket', label: 'Spread size', title: 'Absolute closing spread bucket: pick, small, medium, or large' },
     { filter: 'total', key: 'totalBucket', label: 'Total bucket', title: 'Closing total bucket: low, mid, or high' },
-    { filter: 'timeOfDay', key: 'timeOfDay', label: 'Time of day', title: 'Kickoff window in America/New_York: morning, early, afternoon, or primetime' }
+    { filter: 'timeOfDay', key: 'timeOfDay', label: 'Time of day', title: 'Kickoff window in America/New_York: morning, early, afternoon, or primetime' },
+    { filter: 'starterOut', key: 'starterOut', label: 'Starter out', title: 'Official weekly injury report: quarterback Out, or Active when that season’s nflverse report is loaded and no QB is Out' }
   ];
   const BT_FILTER_LABELS = {
     site: { home: 'Home', road: 'Road', neutral: 'Neutral', matchup: 'Matchup' },
@@ -2056,7 +2086,8 @@
     restBucket: { short: 'Short', normal: 'Normal', bye: 'Bye+' },
     spreadBucket: { pick: 'Pick’em', small: 'Small', medium: 'Medium', large: 'Large' },
     totalBucket: { low: 'Low', mid: 'Mid', high: 'High' },
-    timeOfDay: { morning: 'Morning', early: 'Early', afternoon: 'Afternoon', primetime: 'Primetime' }
+    timeOfDay: { morning: 'Morning', early: 'Early', afternoon: 'Afternoon', primetime: 'Primetime' },
+    starterOut: { out: 'Out', active: 'Active' }
   };
 
   function activeBacktestFilterKeys() {
@@ -2134,7 +2165,7 @@
   function downloadBacktestCsv() {
     const rows = (state.backtest && state.backtest.games) || [];
     if (!rows.length) return;
-    const headers = ['date','season','week','away','home','focus','spread','total','away_rest','home_rest','weather','roof','site','division','role','last_game','last5_wl','last5_ats','home_score','away_score','outright','cover','ou','expected','confidence','ou_confidence','expected_ats_hit','expected_ou_hit'];
+    const headers = ['date','season','week','away','home','focus','spread','total','away_rest','home_rest','weather','roof','site','division','role','last_game','last5_wl','last5_ats','home_score','away_score','outright','cover','ou','expected','confidence','ou_confidence','expected_ats_hit','expected_ou_hit','starter_out'];
     const escCsv = (v) => {
       const s = v == null ? '' : String(v);
       return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
@@ -2147,7 +2178,8 @@
         weather: r.weatherLabel, roof: r.roofLabel, site: r.site, division: r.divisionalLabel, role: r.role,
         last_game: r.lastGame, last5_wl: r.last5wl, last5_ats: r.last5ats, home_score: r.home_score, away_score: r.away_score,
         outright: r.outright, cover: r.coverLabel, ou: r.ou, expected: r.expected, confidence: r.confidence,
-        ou_confidence: r.ouConfidence, expected_ats_hit: r.expectedAtsHit, expected_ou_hit: r.expectedOuHit
+        ou_confidence: r.ouConfidence, expected_ats_hit: r.expectedAtsHit, expected_ou_hit: r.expectedOuHit,
+        starter_out: r.starterOut
       };
       lines.push(headers.map((h) => escCsv(rec[h])).join(','));
     }
@@ -2284,6 +2316,15 @@
     else app.innerHTML = weekView();
 
     app.onclick = async (e) => {
+      const toggleAll = e.target.closest('[data-toggle-all]');
+      if (toggleAll) {
+        const w = state.week || state.bootstrap;
+        const games = [...((w && w.games) || [])].filter(passFilters);
+        const hide = games.some((g) => cardExpanded(g));
+        for (const g of games) cardOpen.set(g.game_id, !hide);
+        render();
+        return;
+      }
       const detailsBtn = e.target.closest('[data-details]');
       if (detailsBtn) {
         const id = detailsBtn.dataset.details;

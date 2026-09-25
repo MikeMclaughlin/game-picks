@@ -27,7 +27,8 @@ const { importGames, loadSeedGames, loadSchedule2026, defaultSeasons } = require
 const { enrichGame, currentSeasonWeek, annotateCard, weekVersus, compareWeekGames } = require('./week-view');
 const { fitCalibrationFromGames } = require('./calibration');
 const { parseHistoryFilters, historyPayload } = require('./history');
-const { parseBacktestFilters, parseChain, backtestPayload, backtestCsv } = require('./backtest');
+const { parseBacktestFilters, parseChain, backtestPayload, backtestCsv, wantsInjurySlice } = require('./backtest');
+const { loadStarterOutIndex } = require('./nflverse-injuries');
 const { listTeamAbbrs } = require('./teams');
 const { persistAiPicks, listAiPicks, applyAiSnapshots } = require('./ai-picks');
 const { historyWindow } = require('./seasons');
@@ -598,7 +599,26 @@ async function handleApi(req, res, url) {
         chain = parseChain(body.chain != null ? body.chain : url.searchParams.get('chain'));
       }
     }
-    const payload = backtestPayload(games, { filters, chain });
+    let injuryIndex = null;
+    if (wantsInjurySlice(filters, chain)) {
+      const from = Number(filters.from);
+      const to = Number(filters.to);
+      const seasons = [];
+      if (Number.isFinite(from) && Number.isFinite(to)) {
+        const lo = Math.min(from, to);
+        const hi = Math.max(from, to);
+        for (let year = lo; year <= hi && seasons.length < 40; year += 1) seasons.push(year);
+      }
+      try {
+        injuryIndex = await loadStarterOutIndex(seasons, { sql });
+        if (injuryIndex.fetchedSeasons && injuryIndex.fetchedSeasons.length) {
+          console.log(`nflverse injuries: fetched ${injuryIndex.fetchedSeasons.join(',')}`);
+        }
+      } catch (err) {
+        console.error('nflverse injuries: load failed', err.message || err);
+      }
+    }
+    const payload = backtestPayload(games, { filters, chain, injuryIndex });
     if (url.searchParams.get('format') === 'csv') {
       const csv = backtestCsv(payload);
       const body = Buffer.from(csv, 'utf8');
