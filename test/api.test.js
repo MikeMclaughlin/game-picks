@@ -284,7 +284,15 @@ test('/api/history supports filter query params', async () => {
   assert.deepEqual(missingSortTitle, []);
   assert.match(script, /data-bt-csv/);
   assert.match(script, /ai-conf/);
-  assert.match(script, /% confidence/);
+  assert.match(script, /Conf\. /);
+  assert.match(script, /ai-conf-line/);
+  assert.match(script, /Toggle All/);
+  assert.match(script, /data-toggle-all/);
+  assert.match(script, /pass UNDER \/ pass OVER/);
+  assert.match(script, /total 50\+/);
+  assert.match(script, /TEAM \+N \/ TEAM −N/);
+  assert.match(script, /Starter out/);
+  assert.match(script, /starter_out/);
   assert.match(script, /Calibrated historical ATS hit rate/);
   assert.doesNotMatch(script, /not a model probability/);
   assert.match(script, /Brier raw/);
@@ -357,6 +365,8 @@ test('/api/history supports filter query params', async () => {
   assert.match(cssText, /grid-template-columns: repeat\(8, minmax\(0, 1fr\)\)/);
   assert.match(cssText, /\.week-bar \{/);
   assert.match(cssText, /\.injury-strip \{/);
+  assert.match(cssText, /\.ai-conf-line \{/);
+  assert.match(cssText, /\.card-foot \{[^}]*margin-top: auto;/);
   assert.match(cssText, /\.ai span\.ai-frozen/);
   assert.match(cssText, /cl-userButtonOuterIdentifier/);
   assert.match(cssText, /background: #FFB81C/);
