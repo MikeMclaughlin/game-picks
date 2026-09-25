@@ -748,8 +748,9 @@ function cardPhase(game) {
   return 'pre';
 }
 
-function defaultExpanded(game) {
-  return cardPhase(game) !== 'final';
+/** Every card starts collapsed. The user opens a card or uses Toggle All. */
+function defaultExpanded() {
+  return false;
 }
 
 /**
