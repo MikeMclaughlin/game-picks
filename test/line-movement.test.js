@@ -14,8 +14,8 @@ const { UPSERT_SQL, UPSERT_CONFLICT, buildBatchUpsert } = require('../src/nfl-da
 const { BUILD } = require('../src/build');
 const { loadSchemaSql } = require('../src/schema');
 
-test('build version is major.minor', () => {
-  assert.equal(BUILD, '1.13');
+test('version is major.minor', () => {
+  assert.equal(BUILD, '1.14');
   assert.match(String(BUILD), /^\d+\.\d+$/);
 });
 

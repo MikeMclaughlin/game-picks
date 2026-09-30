@@ -90,7 +90,17 @@
       starterOut: 'all'
     },
     backtestChain: [],
-    backtestSort: { key: 'gameDate', dir: 'desc' }
+    backtestSort: { key: 'gameDate', dir: 'desc' },
+    performance: null,
+    performanceError: null,
+    performanceLoading: false,
+    performanceSeason: null,
+    performanceCriterion: 'ai-picks',
+    performanceSort: { key: 'week', dir: 'asc' },
+    shareGame: null,
+    shareSeason: null,
+    shareMissing: false,
+    shareSolo: false
   };
   let clerk = null;
   let lastClerkUserId = undefined;
@@ -193,11 +203,11 @@
   }
   function persistWeek() {
     writeStore(LS_WEEK, { filters: state.filters, selectedWeek: state.selectedWeek });
-    if (state.page === 'week') syncLocationHash('week');
+    if (state.page === 'week') syncLocation('week');
   }
   function persistHistory() {
     writeStore(LS_HISTORY, { filters: state.historyFilters, more: state.historyMore });
-    if (state.page === 'history') syncLocationHash('history');
+    if (state.page === 'history') syncLocation('history');
   }
   function persistBacktest() {
     writeStore(LS_BACKTEST, {
@@ -205,7 +215,7 @@
       chain: state.backtestChain,
       more: state.backtestMore
     });
-    if (state.page === 'backtest') syncLocationHash('backtest');
+    if (state.page === 'backtest') syncLocation('backtest');
   }
   function restoreCriteria() {
     const week = readStore(LS_WEEK, null);
@@ -239,19 +249,22 @@
     applyHashState();
   }
 
-  // Hash routes: #home / #week, #standings, #history, #backtest
+  // Hash routes: #home / #week, #standings, #performance, #history, #backtest.
+  // Pick Performance and shared games also use real paths: /performance and /game/:season/:week/:gameId.
   const PAGE_HASH = {
     week: 'home',
     standings: 'standings',
     history: 'history',
-    backtest: 'backtest'
+    backtest: 'backtest',
+    performance: 'performance'
   };
   const HASH_PAGE = {
     home: 'week',
     week: 'week',
     standings: 'standings',
     history: 'history',
-    backtest: 'backtest'
+    backtest: 'backtest',
+    performance: 'performance'
   };
   restoreCriteria();
 
@@ -371,13 +384,102 @@
     }
   }
 
-  function syncLocationHash(page) {
-    const want = hashForPage(page);
-    if (location.hash === want) return;
-    if (page === 'week' && (location.hash === '#week' || location.hash === '#home') && (want === '#home' || want === '#week')) return;
-    const next = `${location.pathname}${location.search}${want}`;
-    if (typeof history.replaceState === 'function') history.replaceState(null, '', next);
-    else location.hash = want;
+  function parseGamePath(pathname) {
+    const parts = String(pathname || '').split('/').filter(Boolean);
+    if (parts[0] !== 'game') return { invalid: true, season: '', week: '', gameId: '' };
+    const season = Number(parts[1]);
+    const week = Number(parts[2]);
+    let gameId = parts[3] || '';
+    try {
+      gameId = decodeURIComponent(gameId);
+    } catch {
+      /* keep the raw segment */
+    }
+    const seasonOk = Number.isInteger(season) && season >= 1990 && season <= 2100;
+    const weekOk = Number.isInteger(week) && week >= 1 && week <= 30;
+    const invalid = parts.length !== 4 || !seasonOk || !weekOk || !gameId;
+    return {
+      invalid,
+      season: seasonOk ? season : parts[1],
+      week: weekOk ? week : parts[2],
+      gameId
+    };
+  }
+
+  function readLocationRoute() {
+    const path = String(location.pathname || '/').replace(/\/+$/, '') || '/';
+    if (path === '/performance') return { kind: 'page', page: 'performance' };
+    if (path.startsWith('/game/')) {
+      const game = parseGamePath(path);
+      return { kind: 'game', page: 'week', ...game };
+    }
+    const hashed = pageFromHash();
+    if (hashed) return { kind: 'page', page: hashed };
+    return { kind: 'page', page: 'week' };
+  }
+
+  function gameSharePath(game) {
+    const season = game.season;
+    const week = game.week;
+    const id = game.gameId || game.game_id;
+    return `/game/${encodeURIComponent(season)}/${encodeURIComponent(week)}/${encodeURIComponent(id)}`;
+  }
+
+  let lastWritten = '';
+
+  function writeHistory(mode, next) {
+    lastWritten = next;
+    const fn = mode === 'push' ? 'pushState' : 'replaceState';
+    if (typeof history[fn] === 'function') history[fn](null, '', next);
+    else location.href = next;
+  }
+
+  function syncLocation(page, mode) {
+    if (page === 'performance') {
+      const want = state.performanceSeason
+        ? `/performance?season=${encodeURIComponent(state.performanceSeason)}`
+        : '/performance';
+      if (`${location.pathname}${location.search}` === want && !location.hash) return;
+      writeHistory(mode, want);
+      return;
+    }
+    if (page === 'week' && state.shareGame) {
+      const want = gameSharePath(state.shareGame);
+      if (location.pathname === want && !location.hash) return;
+      writeHistory(mode, want);
+      return;
+    }
+    const wantHash = hashForPage(page);
+    if (location.pathname === '/' && location.hash === wantHash && !location.search) return;
+    if (page === 'week' && location.pathname === '/' && (location.hash === '#week' || location.hash === '#home') && (wantHash === '#home' || wantHash === '#week')) return;
+    writeHistory(mode, `/${wantHash}`);
+  }
+
+  function applyIncomingRoute(route) {
+    state.shareGame = null;
+    state.shareSeason = null;
+    state.shareMissing = false;
+    state.shareSolo = false;
+    if (route.kind === 'game') {
+      state.shareGame = {
+        season: route.season,
+        week: route.week,
+        gameId: route.gameId,
+        invalid: Boolean(route.invalid),
+        solo: false
+      };
+      state.shareSolo = false;
+      if (route.invalid) state.shareMissing = true;
+      else {
+        state.shareSeason = route.season;
+        state.selectedWeek = route.week;
+      }
+      state.week = null;
+      selectPage('week', { fromHistory: true, reload: true, keepShare: true });
+      return;
+    }
+    state.week = null;
+    selectPage(route.page, { fromHash: true, fromHistory: true, reload: true, keepShare: true });
   }
 
   function highlightTabs() {
@@ -400,32 +502,79 @@
       state.week = null;
     } else if (page === 'standings') {
       state.standings = null;
+    } else if (page === 'performance') {
+      state.performance = null;
+      state.performanceError = null;
+      state.performanceLoading = true;
     }
   }
 
   function selectPage(page, opts) {
     const fromHash = Boolean(opts && opts.fromHash);
+    const fromHistory = Boolean(opts && opts.fromHistory) || fromHash;
+    const keepShare = Boolean(opts && opts.keepShare);
     const next = page === 'home' ? 'week' : page;
     if (!PAGE_HASH[next]) return;
+    let shareCleared = false;
+    if (!keepShare && state.shareGame) {
+      shareCleared = true;
+      state.shareGame = null;
+      state.shareSeason = null;
+      state.shareMissing = false;
+      state.shareSolo = false;
+      if (next === 'week') {
+        state.selectedWeek = null;
+        state.week = null;
+      }
+    }
     if (fromHash) applyHashState();
     const changed = state.page !== next;
     if (changed) {
       state.page = next;
       resetPageData(next);
-    } else if (opts && opts.reload) {
+    } else if ((opts && opts.reload) || shareCleared) {
       resetPageData(next);
     }
-    if (!fromHash) syncLocationHash(state.page);
+    if (!fromHistory) syncLocation(state.page, 'push');
     highlightTabs();
-    if (changed || (opts && opts.reload)) {
+    if (changed || (opts && opts.reload) || shareCleared) {
       render();
       syncLivePoll();
       load().catch(showPageError);
     }
   }
 
-  const hashedPage = pageFromHash();
-  if (hashedPage) state.page = hashedPage;
+  function applyBootRoute() {
+    const route = readLocationRoute();
+    if (route.kind === 'game') {
+      state.page = 'week';
+      state.shareGame = {
+        season: route.season,
+        week: route.week,
+        gameId: route.gameId,
+        invalid: Boolean(route.invalid),
+        solo: false
+      };
+      if (route.invalid) state.shareMissing = true;
+      else {
+        state.shareSeason = route.season;
+        state.selectedWeek = route.week;
+        state.shareMissing = false;
+      }
+    } else {
+      state.page = route.page || 'week';
+      if (state.page === 'performance') {
+        const q = new URLSearchParams(location.search);
+        if (q.has('season') && q.get('season') !== '') {
+          const n = Number(q.get('season'));
+          if (Number.isFinite(n)) state.performanceSeason = n;
+        }
+      }
+    }
+    lastWritten = `${location.pathname}${location.search}${location.hash}`;
+  }
+
+  applyBootRoute();
   highlightTabs();
 
   function esc(s) {
@@ -804,10 +953,16 @@
     closeMenu();
     selectPage(btn.dataset.page);
   });
-  window.addEventListener('hashchange', () => {
+  window.addEventListener('hashchange', onExternalRoute);
+  window.addEventListener('popstate', onExternalRoute);
+
+  function onExternalRoute() {
     closeMenu();
-    selectPage(pageFromHash() || 'week', { fromHash: true, reload: true });
-  });
+    const here = `${location.pathname}${location.search}${location.hash}`;
+    if (here === lastWritten) return;
+    lastWritten = here;
+    applyIncomingRoute(readLocationRoute());
+  }
 
   if (signedOutEl) {
     signedOutEl.addEventListener('click', async (e) => {
@@ -851,14 +1006,37 @@
       });
     }
     // Avoid painting bootstrap (often the finished current week) while the selected week reloads.
-    const pendingWeek = state.page === 'week' && !state.week;
+    const shareInvalid = Boolean(state.shareGame && state.shareGame.invalid);
+    const pendingWeek = state.page === 'week' && !state.week && !shareInvalid;
     if (!pendingWeek) render();
     try {
       if (pendingWeek) {
+        const season = state.shareSeason || state.bootstrap.season;
         const weekNum = state.selectedWeek || state.bootstrap.week;
-        const week = await api(`/api/week?season=${state.bootstrap.season}&week=${weekNum}`);
+        const week = await api(`/api/week?season=${encodeURIComponent(season)}&week=${encodeURIComponent(weekNum)}`);
         if (gen !== loadGen) return;
         state.week = week;
+        if (state.shareGame && !state.shareGame.invalid) {
+          const found = (week.games || []).some((g) => g.game_id === state.shareGame.gameId);
+          state.shareMissing = !found;
+          if (found) cardOpen.set(state.shareGame.gameId, true);
+        }
+      }
+      if (state.page === 'performance' && !state.performance) {
+        state.performanceLoading = true;
+        const seasonQ = state.performanceSeason ? `?season=${encodeURIComponent(state.performanceSeason)}` : '';
+        const performance = await api(`/api/performance${seasonQ}`);
+        if (gen !== loadGen) return;
+        state.performance = performance;
+        state.performanceError = null;
+        state.performanceLoading = false;
+        if (performance && performance.season && state.performanceSeason == null) {
+          state.performanceSeason = performance.season;
+        }
+        if (performance && performance.criteria && performance.criteria.length) {
+          const ids = performance.criteria.map((c) => c.id);
+          if (!ids.includes(state.performanceCriterion)) state.performanceCriterion = ids[0];
+        }
       }
       if (state.page === 'standings' && !state.standings) {
         const standings = await api('/api/standings');
@@ -907,10 +1085,23 @@
         render();
         return;
       }
+      if (state.page === 'performance') {
+        state.performanceError = (err && err.message) || 'Failed to load pick performance';
+        state.performanceLoading = false;
+        render();
+        return;
+      }
+      if (state.page === 'week' && state.shareGame) {
+        state.shareMissing = true;
+        state.week = state.week || { games: [], week: state.shareGame.week, season: state.shareSeason };
+        render();
+        return;
+      }
       throw err;
     }
     if (gen !== loadGen) return;
     render();
+    revealSharedGame();
     syncLivePoll();
   }
 
@@ -1170,6 +1361,7 @@
   }
 
   function cardExpanded(game) {
+    if (state.shareGame && !state.shareMissing && state.shareGame.gameId === game.game_id && !cardOpen.has(game.game_id)) return true;
     if (cardOpen.has(game.game_id)) return cardOpen.get(game.game_id);
     return false;
   }
@@ -1449,10 +1641,14 @@
     const slot = kickoffSlotClass(game);
     const phase = cardPhase(game);
     const expanded = cardExpanded(game);
-    return `<article class="card matchup${game.locked ? ' locked' : ''}${expanded ? '' : ' is-collapsed'}${slot ? ` ${esc(slot)}` : ''}">
+    const shared = Boolean(state.shareGame && !state.shareMissing && state.shareGame.gameId === game.game_id);
+    return `<article class="card matchup${game.locked ? ' locked' : ''}${expanded ? '' : ' is-collapsed'}${slot ? ` ${esc(slot)}` : ''}${shared ? ' is-shared' : ''}" id="game-${esc(game.game_id)}">
       <div class="card-head">
         <span class="kick">${esc(kickoffLabel(game))}</span>
-        <span class="status${game.locked ? ' lock' : ''}">${game.locked ? 'LOCKED' : 'OPEN'}</span>
+        <span class="head-actions">
+          <button type="button" class="share-game" data-share-game="${esc(game.game_id)}" title="Copy a permanent link to this game">Share</button>
+          <span class="status${game.locked ? ' lock' : ''}">${game.locked ? 'LOCKED' : 'OPEN'}</span>
+        </span>
       </div>
       <div class="sides">
         <div class="team">
@@ -1685,10 +1881,38 @@
     return `<button type="button" class="chip" data-toggle-all aria-expanded="${collapsed ? 'false' : 'true'}" aria-label="${esc(label)}" title="${esc(title)}">${label}</button>`;
   }
 
+  function gameMissingView() {
+    const share = state.shareGame || {};
+    const season = share.season == null || share.season === '' ? 'that season' : share.season;
+    const week = share.week == null || share.week === '' ? 'that week' : share.week;
+    const id = share.gameId || 'that game';
+    return `<section class="panel game-missing">
+      <h1>Game not found</h1>
+      <p class="lede">No game matches ${esc(season)} / week ${esc(week)} / ${esc(id)}. The link may be out of date, or the week and game id may not belong together.</p>
+      <button type="button" class="chip" data-share-home title="Back to the current week on Home">Back to Home</button>
+    </section>`;
+  }
+
+  function shareBanner(game) {
+    if (!state.shareGame || state.shareMissing || !game) return '';
+    const label = state.shareSolo ? 'Show full week' : 'Only this game';
+    const title = state.shareSolo
+      ? 'Show every game in this week and keep this one highlighted'
+      : 'Show only this shared game';
+    return `<div class="share-banner">
+      <span>Shared game · ${esc(game.away_team)} @ ${esc(game.home_team)} · Week ${esc(game.week)}, ${esc(game.season)}</span>
+      <button type="button" class="chip" data-share-solo title="${esc(title)}">${label}</button>
+    </div>`;
+  }
+
   function weekView() {
+    if (state.shareMissing) return gameMissingView();
     const w = state.week || state.bootstrap;
     const all = [...(w.games || [])].sort(compareWeekCards);
-    const games = all.filter(passFilters);
+    const shared = state.shareGame && all.find((g) => g.game_id === state.shareGame.gameId);
+    let games = all.filter(passFilters);
+    if (shared && !games.some((g) => g.game_id === shared.game_id)) games = [shared, ...games];
+    if (state.shareSolo && shared) games = [shared];
     const emptyMsg = all.length
       ? '<p>No games match those filters.</p>'
       : `<p class="notice">No games scheduled for week ${esc(w.week)} yet. Import schedule/lines for that week (npm run import / cron) so advance picks can load here.</p>`;
@@ -1696,6 +1920,7 @@
       <div class="week-hero">
         <div class="week-pill">WEEK ${esc(w.week)}</div>
       </div>
+      ${shareBanner(shared)}
       ${weekBar(all)}
       <div class="filters">
         ${weekPicker(w)}
@@ -2339,6 +2564,239 @@
     });
   }
 
+  function perfColumns(criterion) {
+    const cols = [
+      { key: 'week', label: 'Week', title: 'NFL week number for this season' }
+    ];
+    if (criterion.singlePick) {
+      cols.push({
+        key: 'pick',
+        label: 'Pick',
+        title: 'Team this criterion picked for the week, shown with the closing spread'
+      });
+    }
+    if ((criterion.markets || []).includes('ats')) {
+      cols.push({
+        key: 'atsRecord',
+        label: 'ATS',
+        title: 'Against-the-spread record for the week (W-L, or W-L-P when a spread pushes). Pending means that week has no graded final yet.'
+      });
+      cols.push({
+        key: 'ats',
+        label: 'ATS win %',
+        title: 'Week ATS win percentage. Wins divided by wins plus losses. Pushes are excluded.'
+      });
+    }
+    if ((criterion.markets || []).includes('ou')) {
+      cols.push({
+        key: 'ouRecord',
+        label: 'O/U',
+        title: 'Over/under record for the week (W-L, or W-L-P when the total pushes). Pending means that week has no graded final yet.'
+      });
+      cols.push({
+        key: 'ou',
+        label: 'O/U win %',
+        title: 'Week over/under win percentage. Wins divided by wins plus losses. Pushes are excluded.'
+      });
+    }
+    return cols;
+  }
+
+  function perfSortValue(row, key) {
+    if (key === 'week') return row.week;
+    if (key === 'pick') return row.pick || null;
+    if (key === 'atsRecord' || key === 'ouRecord') {
+      const market = row.markets && row.markets[key === 'atsRecord' ? 'ats' : 'ou'];
+      if (!market || market.pending || !market.graded) return null;
+      return market.wins - market.losses;
+    }
+    if (key === 'ats' || key === 'ou') {
+      const market = row.markets && row.markets[key];
+      if (!market || market.pending || market.winPct == null) return null;
+      return market.winPct;
+    }
+    return null;
+  }
+
+  function sortPerfWeeks(weeks) {
+    const { key, dir } = state.performanceSort;
+    const mul = dir === 'asc' ? 1 : -1;
+    return [...(weeks || [])].sort((a, b) => {
+      const av = perfSortValue(a, key);
+      const bv = perfSortValue(b, key);
+      if (av == null && bv == null) return a.week - b.week;
+      if (av == null) return 1;
+      if (bv == null) return -1;
+      if (typeof av === 'string') {
+        const cmp = av.localeCompare(bv);
+        if (cmp) return cmp * mul;
+      } else if (av !== bv) return (av - bv) * mul;
+      return a.week - b.week;
+    });
+  }
+
+  function perfMarketText(market, kind) {
+    if (!market) return '—';
+    if (kind === 'record') return market.label || '—';
+    if (market.pending || market.winPct == null) return '—';
+    return fmtPct(market.winPct);
+  }
+
+  function perfCurrentCards(criterion, report) {
+    if (!criterion.showCurrent) return '';
+    const heading = report.isCurrentSeason ? 'Current win %' : 'Season win %';
+    const bits = (criterion.markets || []).map((market) => {
+      const tally = criterion.year && criterion.year.markets && criterion.year.markets[market];
+      const name = market === 'ou' ? 'O/U' : 'ATS';
+      const pct = tally && tally.winPct != null ? fmtPct(tally.winPct) : '—';
+      const record = tally && tally.graded ? tally.label : '0-0';
+      const title = market === 'ou'
+        ? `${heading} for over/under. Wins divided by wins plus losses. Pushes are excluded.`
+        : `${heading} against the spread. Wins divided by wins plus losses. Pushes are excluded.`;
+      return `<div class="perf-pct" title="${esc(title)}">
+        <div class="k">${esc(heading)} · ${name}</div>
+        <div class="v">${esc(pct)}</div>
+        <div class="s">${esc(record)}</div>
+      </div>`;
+    });
+    return `<div class="perf-current">${bits.join('')}</div>`;
+  }
+
+  function perfYearLine(criterion) {
+    const parts = (criterion.markets || []).map((market) => {
+      const tally = criterion.year && criterion.year.markets && criterion.year.markets[market];
+      const name = market === 'ou' ? 'O/U' : 'ATS';
+      const record = tally ? (tally.graded ? tally.label : '0-0') : '0-0';
+      const pct = tally && tally.winPct != null ? fmtPct(tally.winPct) : '—';
+      return `${name} ${record} · ${pct}`;
+    });
+    return parts.join(' · ');
+  }
+
+  function performanceView() {
+    if (state.performanceLoading && !state.performance) {
+      return '<section class="panel"><h1>Pick Performance</h1><p class="hist-loading">Loading graded results…</p></section>';
+    }
+    if (state.performanceError && !state.performance) {
+      return `<section class="panel"><h1>Pick Performance</h1><p class="notice">${esc(state.performanceError)}</p></section>`;
+    }
+    const report = state.performance;
+    if (!report) return '<section class="panel"><h1>Pick Performance</h1><p class="hist-loading">Loading graded results…</p></section>';
+    const list = report.criteria || [];
+    const criterion = list.find((c) => c.id === state.performanceCriterion) || list[0];
+    if (!criterion) {
+      return '<section class="panel"><h1>Pick Performance</h1><p class="notice">No criteria are registered.</p></section>';
+    }
+    const seasons = report.seasons && report.seasons.length ? report.seasons : [report.season];
+    const season = state.performanceSeason || report.season;
+    const cols = perfColumns(criterion);
+    const rows = sortPerfWeeks(criterion.weeks);
+    const yearTitle = `Season total for ${season}. ${perfYearLine(criterion)}. Win percentage is wins divided by wins plus losses. Pushes are excluded.`;
+    const body = rows.map((row) => `<tr>
+      <td>${esc(row.week)}</td>
+      ${criterion.singlePick ? `<td title="${esc(row.pickDetail || 'No pick for this week')}">${esc(row.pick || '—')}</td>` : ''}
+      ${(criterion.markets || []).includes('ats') ? `<td>${esc(perfMarketText(row.markets.ats, 'record'))}</td><td>${esc(perfMarketText(row.markets.ats, 'pct'))}</td>` : ''}
+      ${(criterion.markets || []).includes('ou') ? `<td>${esc(perfMarketText(row.markets.ou, 'record'))}</td><td>${esc(perfMarketText(row.markets.ou, 'pct'))}</td>` : ''}
+    </tr>`).join('');
+    const yearCells = (criterion.markets || []).includes('ats')
+      ? `<td>${esc(perfMarketText(criterion.year.markets.ats, 'record'))}</td><td>${esc(perfMarketText(criterion.year.markets.ats, 'pct'))}</td>`
+      : '';
+    const yearOu = (criterion.markets || []).includes('ou')
+      ? `<td>${esc(perfMarketText(criterion.year.markets.ou, 'record'))}</td><td>${esc(perfMarketText(criterion.year.markets.ou, 'pct'))}</td>`
+      : '';
+    const emptyAi = criterion.id === 'ai-picks' && criterion.year && criterion.year.markets
+      && !(criterion.year.markets.ats && criterion.year.markets.ats.graded)
+      && !(criterion.year.markets.ou && criterion.year.markets.ou.graded);
+    const emptyNote = emptyAi
+      ? '<p class="notice">No stored AI picks are graded for this season yet. Picks are saved when a week is opened and frozen at kickoff.</p>'
+      : '';
+    const dbNote = report.db === false && criterion.id === 'ai-picks'
+      ? '<p class="bt-note">AI picks are read from the database. With no database connected, those rows stay empty until picks are stored.</p>'
+      : '';
+    return `<section class="panel perf-page">
+      <h1>Pick Performance</h1>
+      <p class="lede">One section per betting criterion. Only final games count. A week with no final games stays Pending.</p>
+      <div class="weekbar">
+        <label title="Season whose graded weeks are shown">Season
+          <select data-perf-season title="Choose the season to score">${seasons.map((y) => `<option value="${esc(y)}"${Number(y) === Number(season) ? ' selected' : ''}>${esc(y)}</option>`).join('')}</select>
+        </label>
+      </div>
+      <div class="perf-tabs" role="tablist">
+        ${list.map((item) => `<button type="button" class="chip${item.id === criterion.id ? ' on' : ''}" data-perf-criterion="${esc(item.id)}" role="tab" aria-selected="${item.id === criterion.id ? 'true' : 'false'}" title="${esc(item.summary || item.name)}">${esc(item.name)}</button>`).join('')}
+      </div>
+      ${perfCurrentCards(criterion, report)}
+      <p class="perf-year" title="${esc(yearTitle)}"><b>${esc(season)} season</b> · ${esc(perfYearLine(criterion))}</p>
+      <p class="perf-glossary">${esc(criterion.glossary || criterion.description || '')}</p>
+      ${criterion.assumption ? '<p class="bt-note">This definition was not in the app before. It lives in src/performance.js so it can be changed.</p>' : ''}
+      ${emptyNote}
+      ${dbNote}
+      <div class="perf-table-wrap">
+        <table class="hist-table perf-table">
+          <thead><tr>${cols.map((col) => `<th data-perf-sort="${esc(col.key)}" title="${esc(col.title)}" class="${state.performanceSort.key === col.key ? 'sorted' : ''}">${esc(col.label)}${state.performanceSort.key === col.key ? `<span class="caret">${state.performanceSort.dir === 'asc' ? '▲' : '▼'}</span>` : ''}</th>`).join('')}</tr></thead>
+          <tbody>${body || '<tr><td colspan="6">No weeks for this season.</td></tr>'}</tbody>
+          <tfoot><tr class="perf-total">
+            <td title="${esc(yearTitle)}">Season</td>
+            ${criterion.singlePick ? '<td title="One pick per week, totaled below in ATS">—</td>' : ''}
+            ${yearCells}${yearOu}
+          </tr></tfoot>
+        </table>
+      </div>
+    </section>`;
+  }
+
+  function gameShareUrl(game) {
+    return `${location.origin}${gameSharePath({ season: game.season, week: game.week, gameId: game.game_id })}`;
+  }
+
+  function flashShare(message) {
+    let el = document.getElementById('share-toast');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'share-toast';
+      el.className = 'share-toast';
+      el.setAttribute('role', 'status');
+      document.body.appendChild(el);
+    }
+    el.textContent = message;
+    el.hidden = false;
+    clearTimeout(flashShare.timer);
+    flashShare.timer = setTimeout(() => { el.hidden = true; }, 1800);
+  }
+
+  function mobileShareAvailable() {
+    return typeof navigator.share === 'function' && window.matchMedia('(max-width: 720px)').matches;
+  }
+
+  async function copyGameLink(game) {
+    const url = gameShareUrl(game);
+    const title = `${game.away_team} @ ${game.home_team}`;
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(url);
+        flashShare('Link copied');
+        return;
+      }
+    } catch {
+      /* clipboard blocked; try the mobile share sheet */
+    }
+    if (mobileShareAvailable()) {
+      try {
+        await navigator.share({ title, text: title, url });
+        return;
+      } catch (err) {
+        if (err && err.name === 'AbortError') return;
+      }
+    }
+    window.prompt('Copy this game link', url);
+  }
+
+  function revealSharedGame() {
+    if (state.page !== 'week' || !state.shareGame || state.shareMissing || state.shareSolo) return;
+    const el = document.getElementById(`game-${state.shareGame.gameId}`);
+    if (!el || typeof el.scrollIntoView !== 'function') return;
+    el.scrollIntoView({ block: 'center', behavior: 'auto' });
+  }
+
   function render() {
     if (!state.bootstrap) {
       app.innerHTML = '<p>Loading…</p>';
@@ -2346,11 +2804,37 @@
     }
     if (state.page === 'week') app.innerHTML = weekView();
     else if (state.page === 'standings') app.innerHTML = `<section class="panel"><h1>Standings</h1>${standingsTable((state.standings && state.standings.standings) || state.bootstrap.standings || [], true)}</section>`;
+    else if (state.page === 'performance') app.innerHTML = performanceView();
     else if (state.page === 'history') app.innerHTML = historyView();
     else if (state.page === 'backtest') app.innerHTML = backtestView();
     else app.innerHTML = weekView();
 
     app.onclick = async (e) => {
+      const shareBtn = e.target.closest('[data-share-game]');
+      if (shareBtn) {
+        const id = shareBtn.dataset.shareGame;
+        const games = ((state.week || state.bootstrap) && (state.week || state.bootstrap).games) || [];
+        const game = games.find((g) => g.game_id === id);
+        if (game) copyGameLink(game);
+        return;
+      }
+      if (e.target.closest('[data-share-home]')) {
+        selectPage('week');
+        return;
+      }
+      if (e.target.closest('[data-share-solo]')) {
+        state.shareSolo = !state.shareSolo;
+        render();
+        revealSharedGame();
+        return;
+      }
+      const perfTab = e.target.closest('[data-perf-criterion]');
+      if (perfTab && state.page === 'performance') {
+        state.performanceCriterion = perfTab.dataset.perfCriterion;
+        state.performanceSort = { key: 'week', dir: 'asc' };
+        render();
+        return;
+      }
       const toggleAll = e.target.closest('[data-toggle-all]');
       if (toggleAll) {
         const w = state.week || state.bootstrap;
@@ -2385,6 +2869,14 @@
         const key = sort.dataset.sort;
         if (state.sort.key === key) state.sort.dir = state.sort.dir === 'asc' ? 'desc' : 'asc';
         else state.sort = { key, dir: key === 'username' ? 'asc' : 'desc' };
+        render();
+        return;
+      }
+      const perfSort = e.target.closest('th[data-perf-sort]');
+      if (perfSort && state.page === 'performance') {
+        const key = perfSort.dataset.perfSort;
+        if (state.performanceSort.key === key) state.performanceSort.dir = state.performanceSort.dir === 'asc' ? 'desc' : 'asc';
+        else state.performanceSort = { key, dir: key === 'week' || key === 'pick' ? 'asc' : 'desc' };
         render();
         return;
       }
@@ -2494,11 +2986,30 @@
     app.onchange = (e) => {
       const weekSel = e.target.closest('[data-week-select]');
       if (weekSel) {
+        state.shareGame = null;
+        state.shareSeason = null;
+        state.shareMissing = false;
+        state.shareSolo = false;
         state.selectedWeek = Number(weekSel.value);
         state.week = null;
         cardOpen.clear();
         persistWeek();
         load().catch(showPageError);
+        return;
+      }
+      const perfSeason = e.target.closest('[data-perf-season]');
+      if (perfSeason) {
+        state.performanceSeason = Number(perfSeason.value);
+        state.performance = null;
+        state.performanceError = null;
+        state.performanceLoading = true;
+        syncLocation('performance', 'replace');
+        render();
+        load().catch((err) => {
+          state.performanceError = (err && err.message) || 'Failed to load pick performance';
+          state.performanceLoading = false;
+          render();
+        });
         return;
       }
       const dimSel = e.target.closest('[data-chain-dim]');
@@ -2523,8 +3034,8 @@
     };
   }
 
-  if (state.page === 'history' || state.page === 'backtest' || state.page === 'week') {
-    syncLocationHash(state.page);
+  if (state.page === 'performance' || state.page === 'history' || state.page === 'backtest' || (state.page === 'week' && !state.shareGame)) {
+    syncLocation(state.page);
   }
 
   (async () => {

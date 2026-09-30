@@ -25,6 +25,7 @@ test('/api/health returns JSON', async () => {
   assert.equal(res.status, 200);
   assert.equal(body.ok, true);
   assert.equal(body.build, BUILD);
+  assert.equal(body.version, BUILD);
   assert.equal(body.db, 'missing');
   assert.equal(body.auth, 'missing');
   server.close();
@@ -209,9 +210,9 @@ test('/api/history supports filter query params', async () => {
 
   const html = await fetch(`http://127.0.0.1:${port}/`);
   const page = await html.text();
-  assert.match(page, new RegExp(`styles\\.css\\?v=build-${BUILD}`));
-  assert.match(page, new RegExp(`app\\.js\\?v=build-${BUILD}`));
-  assert.match(page, new RegExp(`Game Picks · build ${BUILD}`));
+  assert.match(page, new RegExp(`styles\\.css\\?v=version-${BUILD}`));
+  assert.match(page, new RegExp(`app\\.js\\?v=version-${BUILD}`));
+  assert.match(page, new RegExp(`Game Picks · Version ${BUILD}`));
   assert.match(page, /id="build-foot"/);
   const appJs = await fetch(`http://127.0.0.1:${port}/app.js`);
   const script = await appJs.text();

@@ -24,7 +24,7 @@ const {
 } = require('./clerk-auth');
 const { validatePick, gradeAll, isLocked, exclusivePartner, assertExclusivePicks } = require('./grader');
 const { importGames, loadSeedGames, loadSchedule2026, defaultSeasons } = require('./nfl-data');
-const { enrichGame, currentSeasonWeek, annotateCard, weekVersus, compareWeekGames } = require('./week-view');
+const { enrichGame, currentSeasonWeek, annotateCard, weekVersus, compareWeekGames, formatSpreadFavorite } = require('./week-view');
 const { fitCalibrationFromGames } = require('./calibration');
 const { parseHistoryFilters, historyPayload } = require('./history');
 const { parseBacktestFilters, parseChain, backtestPayload, backtestCsv, wantsInjurySlice } = require('./backtest');
@@ -33,6 +33,7 @@ const { listTeamAbbrs } = require('./teams');
 const { persistAiPicks, listAiPicks, applyAiSnapshots } = require('./ai-picks');
 const { historyWindow } = require('./seasons');
 const { BUILD } = require('./build');
+const { buildPerformance } = require('./performance');
 const { attachLiveScores, resolveLiveScores } = require('./espn-live');
 const { attachInjuries } = require('./espn-injuries');
 
@@ -132,9 +133,143 @@ async function seedIfNeeded(sql) {
 
 function stampHtml(html) {
   return html
-    .replace(/\/styles\.css\?v=build-[^"]+/, `/styles.css?v=build-${BUILD}`)
-    .replace(/\/app\.js\?v=build-[^"]+/, `/app.js?v=build-${BUILD}`)
-    .replace(/Game Picks · build [^<]+/, `Game Picks · build ${BUILD}`);
+    .replace(/\/styles\.css\?v=(?:build|version)-[^"]+/, `/styles.css?v=version-${BUILD}`)
+    .replace(/\/app\.js\?v=(?:build|version)-[^"]+/, `/app.js?v=version-${BUILD}`)
+    .replace(/Game Picks · (?:build|Version) [^<]+/, `Game Picks · Version ${BUILD}`);
+}
+
+function escapeAttr(value) {
+  return String(value == null ? '' : value)
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;');
+}
+
+function publicOrigin(req, url) {
+  const forwarded = req.headers['x-forwarded-proto'];
+  const proto = String(forwarded || url.protocol || 'https').split(',')[0].trim().replace(/:$/, '') || 'https';
+  const host = String(req.headers['x-forwarded-host'] || req.headers.host || url.host || 'localhost').split(',')[0].trim();
+  return `${proto}://${host}`;
+}
+
+function parseGameRequestPath(pathname) {
+  const parts = String(pathname || '').split('/').filter(Boolean);
+  if (parts[0] !== 'game') return { invalid: true, season: '', week: '', gameId: '' };
+  const season = Number(parts[1]);
+  const week = Number(parts[2]);
+  let gameId = parts[3] || '';
+  try {
+    gameId = decodeURIComponent(gameId);
+  } catch {
+    /* keep the raw segment */
+  }
+  const seasonOk = Number.isInteger(season) && season >= 1990 && season <= 2100;
+  const weekOk = Number.isInteger(week) && week >= 1 && week <= 30;
+  const invalid = parts.length !== 4 || !seasonOk || !weekOk || !gameId;
+  return {
+    invalid,
+    season: seasonOk ? season : parts[1],
+    week: weekOk ? week : parts[2],
+    gameId
+  };
+}
+
+function isAppDocumentPath(pathname) {
+  const pathOnly = String(pathname || '/').replace(/\/+$/, '') || '/';
+  if (pathOnly === '/' || pathOnly === '/index.html' || pathOnly === '/performance') return true;
+  return pathOnly.startsWith('/game/');
+}
+
+function replaceMeta(html, attr, key, content) {
+  const tag = `<meta ${attr}="${key}" content="${escapeAttr(content)}">`;
+  const re = new RegExp(`<meta ${attr}="${key}" content="[^"]*">`);
+  if (re.test(html)) return html.replace(re, tag);
+  return html.replace('</head>', `${tag}\n</head>`);
+}
+
+function applyOpenGraph(html, og) {
+  let next = html.replace(/<title>[^<]*<\/title>/, `<title>${escapeAttr(og.title)}</title>`);
+  next = replaceMeta(next, 'name', 'description', og.description);
+  next = replaceMeta(next, 'property', 'og:title', og.title);
+  next = replaceMeta(next, 'property', 'og:description', og.description);
+  next = replaceMeta(next, 'property', 'og:url', og.url);
+  next = replaceMeta(next, 'name', 'twitter:title', og.title);
+  next = replaceMeta(next, 'name', 'twitter:description', og.description);
+  return next;
+}
+
+async function findSharedGame(season, week, gameId) {
+  const { sql } = await withDb();
+  if (sql) {
+    const rows = await sql`SELECT * FROM games WHERE game_id = ${gameId} LIMIT 1`;
+    const game = mapGame(rows[0]);
+    if (!game) return null;
+    if (Number(game.season) !== Number(season) || Number(game.week) !== Number(week)) return null;
+    return game;
+  }
+  const games = loadSeedGames();
+  return games.find((game) => game.game_id === gameId && Number(game.season) === Number(season) && Number(game.week) === Number(week)) || null;
+}
+
+async function openGraphFor(req, url) {
+  const pathOnly = url.pathname.replace(/\/+$/, '') || '/';
+  const origin = publicOrigin(req, url);
+  if (pathOnly === '/performance') {
+    return {
+      title: 'Pick Performance · Game Picks',
+      description: 'Historical weekly records and win percentage for AI picks and other betting criteria.',
+      url: `${origin}/performance`
+    };
+  }
+  if (pathOnly.startsWith('/game/')) {
+    const parsed = parseGameRequestPath(pathOnly);
+    const fallback = {
+      title: 'Game not found · Game Picks',
+      description: 'That season, week, and game id do not match a game.',
+      url: `${origin}${pathOnly}`
+    };
+    if (parsed.invalid) return fallback;
+    try {
+      const game = await findSharedGame(parsed.season, parsed.week, parsed.gameId);
+      if (!game) return fallback;
+      const spread = formatSpreadFavorite(game.spread_line, game.home_team, game.away_team);
+      const line = spread ? ` Spread ${spread}.` : '';
+      return {
+        title: `${game.away_team} @ ${game.home_team} · Week ${game.week}, ${game.season} · Game Picks`,
+        description: `${game.away_team} at ${game.home_team}, week ${game.week} of ${game.season}.${line}`,
+        url: `${origin}/game/${game.season}/${game.week}/${encodeURIComponent(game.game_id)}`
+      };
+    } catch (err) {
+      console.error('open graph lookup failed', err);
+      return fallback;
+    }
+  }
+  return {
+    title: 'Game Picks',
+    description: 'Season pick-em · outright / ATS / O/U',
+    url: `${origin}/`
+  };
+}
+
+async function serveAppDocument(req, res, url) {
+  const index = path.join(PUBLIC, 'index.html');
+  if (!fs.existsSync(index)) {
+    json(res, 404, { ok: false, error: 'Not found' });
+    return;
+  }
+  let html = stampHtml(fs.readFileSync(index, 'utf8'));
+  const cfg = JSON.stringify(publicClerkConfig());
+  if (!html.includes('window.__CLERK_CONFIG__')) {
+    html = html.replace('</head>', `<script>window.__CLERK_CONFIG__=${cfg};</script>\n</head>`);
+  }
+  html = applyOpenGraph(html, await openGraphFor(req, url));
+  const body = Buffer.from(html, 'utf8');
+  res.writeHead(200, {
+    'content-type': 'text/html; charset=utf-8',
+    'content-length': body.length,
+    'cache-control': 'no-store'
+  });
+  res.end(body);
 }
 
 async function freezeWeekPicks(sql, cards, season, week) {
@@ -371,6 +506,7 @@ async function handleApi(req, res, url) {
         ok: true,
         service: 'game-picks',
         build: BUILD,
+        version: BUILD,
         db: 'missing',
         auth: isClerkConfigured() ? 'ok' : 'missing',
         time: new Date().toISOString()
@@ -382,6 +518,7 @@ async function handleApi(req, res, url) {
         ok: true,
         service: 'game-picks',
         build: BUILD,
+        version: BUILD,
         db: dbPing.ok ? 'ok' : 'error',
         database: dbPing.ok ? 'ok' : dbPing.reason,
         auth: isClerkConfigured() ? 'ok' : 'missing',
@@ -392,6 +529,7 @@ async function handleApi(req, res, url) {
         ok: true,
         service: 'game-picks',
         build: BUILD,
+        version: BUILD,
         db: 'error',
         database: err.message,
         auth: isClerkConfigured() ? 'ok' : 'missing',
@@ -454,7 +592,8 @@ async function handleApi(req, res, url) {
       standings: board.slice(0, 8),
       teams: listTeamAbbrs(),
       rulesVersion: 1,
-      build: BUILD
+      build: BUILD,
+      version: BUILD
     });
   }
 
@@ -684,8 +823,35 @@ async function handleApi(req, res, url) {
       games: live.byGame,
       fetchedAt: live.fetchedAt,
       error: live.error || null,
-      build: BUILD
+      build: BUILD,
+      version: BUILD
     });
+  }
+
+  if (pathname === '/api/performance' && method === 'GET') {
+    if (sql) await seedIfNeeded(sql);
+    const games = await allGames(sql);
+    const seasons = [...new Set(games.map((g) => Number(g.season)).filter(Number.isFinite))].sort((a, b) => a - b);
+    const cursor = currentSeasonWeek(games);
+    const requested = Number(url.searchParams.get('season'));
+    const season = Number.isFinite(requested) && requested > 0 ? requested : cursor.season;
+    let aiRows = [];
+    if (sql) {
+      try {
+        aiRows = await listAiPicks(sql, { season });
+      } catch (err) {
+        console.error('performance ai picks failed', err);
+        aiRows = [];
+      }
+    }
+    const report = buildPerformance({
+      games,
+      season,
+      seasons,
+      aiRows,
+      currentSeason: cursor.season
+    });
+    return json(res, 200, { ok: true, db: Boolean(sql), ...report });
   }
 
   if (pathname === '/api/ai-picks' && method === 'GET') {
@@ -715,13 +881,13 @@ async function handler(req, res) {
       await handleApi(req, res, url);
       return;
     }
-    if (serveStatic(url.pathname, res)) return;
-    const index = path.join(PUBLIC, 'index.html');
-    if (fs.existsSync(index)) {
-      sendFile(res, index);
+    const pathOnly = url.pathname.replace(/\/+$/, '') || '/';
+    if (isAppDocumentPath(pathOnly)) {
+      await serveAppDocument(req, res, url);
       return;
     }
-    json(res, 404, { ok: false, error: 'Not found' });
+    if (serveStatic(url.pathname, res)) return;
+    await serveAppDocument(req, res, url);
   } catch (err) {
     const status = err.statusCode || 500;
     if (status >= 500) console.error(err);
