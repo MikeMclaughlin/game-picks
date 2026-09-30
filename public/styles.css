@@ -370,6 +370,43 @@ h1, h2 { margin: 0 0 8px; font-size: 22px; font-weight: 700; letter-spacing: 0.0
   text-align: center; color: var(--muted); font-size: 11px;
   padding: 16px 12px 20px; letter-spacing: 0.04em;
 }
+.head-actions { display: flex; align-items: center; gap: 8px; }
+.share-game {
+  text-transform: none; letter-spacing: 0; font-weight: 700; font-size: 11px;
+  border: 1px solid var(--gold); color: var(--gold); background: transparent;
+  border-radius: 4px; padding: 2px 8px; cursor: pointer;
+}
+.share-game:hover { background: var(--gold); color: #111; }
+.card.is-shared { box-shadow: inset 0 0 0 2px var(--gold); }
+.share-banner {
+  display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; align-items: center;
+  margin: 0 0 10px; padding: 8px 10px; border: 1px solid var(--gold); border-radius: 6px;
+  background: #1a1608; color: var(--text);
+}
+.share-toast[hidden] { display: none; }
+.share-toast {
+  position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%);
+  background: var(--gold); color: #111; font-weight: 800; padding: 8px 14px;
+  border-radius: 999px; z-index: 30;
+}
+.perf-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin: 0 0 10px; }
+.perf-current {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 8px; margin: 0 0 12px;
+}
+.perf-pct {
+  background: #FFB81C; color: #111; border: 1px solid #d9a018; border-radius: 8px; padding: 12px 14px;
+}
+.perf-pct .k { font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: #3a2a00; }
+.perf-pct .v { font-size: 32px; font-weight: 800; line-height: 1.1; margin-top: 4px; }
+.perf-pct .s { font-size: 13px; margin-top: 2px; color: #3a2a00; }
+.perf-year { margin: 0 0 8px; font-size: 14px; }
+.perf-year b { color: var(--gold); }
+.perf-glossary { color: var(--muted); font-size: 12px; margin: 0 0 10px; }
+.perf-table-wrap { overflow-x: auto; }
+.perf-table th, .perf-table td { white-space: nowrap; }
+.perf-total td { font-weight: 800; color: var(--gold); border-top: 2px solid var(--gold); }
+.game-missing .chip { margin-top: 4px; }
 .filters { display: flex; gap: 6px; flex-wrap: wrap; margin: 0 0 10px; }
 .weekbar { display: flex; gap: 8px; align-items: center; margin: 0 0 10px; flex-wrap: wrap; }
 .week-hero { display: flex; justify-content: center; margin: 2px 0 8px; }
@@ -506,6 +543,9 @@ th .caret { color: var(--gold); font-size: 10px; margin-left: 4px; }
   .week-bar { gap: 6px 12px; font-size: 13px; }
   .week-bar strong { font-size: 18px; }
   .city { font-size: 18px; }
+  .card-head { flex-wrap: wrap; gap: 4px; }
+  .share-game { padding: 4px 8px; }
+  .perf-pct .v { font-size: 28px; }
   .nav-toggle { display: inline-flex; }
   .top { position: sticky; }
   .site-nav {
