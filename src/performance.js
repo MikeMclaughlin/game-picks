@@ -1,7 +1,7 @@
 'use strict';
 
 const { gradeAts, gradeOu, scoresReady, toNumber } = require('./grader');
-const { formatAtsPick, resultLetter } = require('./week-view');
+const { formatAtsPick, formatLine } = require('./week-view');
 
 /**
  * Pick-performance criteria.
@@ -16,21 +16,34 @@ const { formatAtsPick, resultLetter } = require('./week-view');
  */
 
 /**
- * Biggest Loser — ASSUMPTION.
- * Nothing in the repo, schema, or comments defined this criterion.
- * Change BIGGEST_LOSER_GLOSSARY and chooseBiggestLoser together.
+ * Biggest Loser — one pick per game, not one pick per week.
  *
- * Each regular-season week produces one pick: the team with the worst
- * record entering that week (before the week's first kickoff, so Thursday
- * does not change Sunday's record). Win % = wins / (wins + losses). Ties
- * are ignored. A team with no decided games ranks as .500, so week 1 is a
- * full tie. Ties break to the larger point-spread underdog (more points
- * received on the closing spread; favorites receive a negative number).
- * If that is also level, the alphabetically later abbreviation is used.
- * The pick is graded ATS with gradeAts (cover = win, miss = loss, push = P).
- * Only final games count. A week with no graded final is Pending.
+ * For each regular-season game, take each team's signed margin from its
+ * most recent final game earlier in the same season. Margin is that team's
+ * points minus the opponent's points: a win is positive, a loss is negative,
+ * a tie is 0. A bye uses the last game that team actually played. The pick
+ * is the team with the lower signed margin (lost by the most, or, if neither
+ * team lost, won by the least).
+ *
+ * No pick when neither team has a previous game (week 1), when only one
+ * team has a previous game, or when the two signed margins tie exactly.
+ * No pick, and not graded, when the picked team's point spread is under 4
+ * or over 9 in absolute value. That spread is the frozen or stored line
+ * when the game has one, otherwise the current line. No line means no pick.
+ * A qualifying pick is graded ATS with gradeAts (W-L, or W-L-P on a push).
+ * Only final games are graded. An unfinished game that has a pick is pending.
  */
-const BIGGEST_LOSER_GLOSSARY = 'Biggest Loser is an assumption (no earlier definition in this app). Each regular-season week, the pick is the team with the worst record entering that week: win % is wins ÷ (wins + losses), ties ignored, and no decided games ranks as .500. Ties break to the larger point-spread underdog (more points received). A remaining tie uses the alphabetically later abbreviation. Graded by whether that team covers the spread (ATS). Only final games count; a week that is not final shows as Pending.';
+const BIGGEST_LOSER_GLOSSARY = 'Biggest Loser is scored on each regular-season game. For each team, the signed margin is that team’s points minus the opponent’s points in its most recent final game earlier in the season (a win is positive, a loss is negative, a tie is 0). A bye uses the last game played. The pick is the team with the lowest signed margin: the team that lost by the most, or, if neither team lost, the team that won by the least. If neither team has a previous game (week 1), or only one team has a previous game, there is no pick. If the two signed margins tie exactly, that game is skipped. The game is also ignored (no pick, not graded) when the picked team’s point spread is less than 4 or greater than 9 in absolute value. That spread is the frozen or stored line when the game has one, otherwise the current line; if there is no line, there is no pick. Qualifying picks are graded ATS with the same cover rules as wagers (W-L, or W-L-P on a push). Only final games are graded. An unfinished game that has a pick shows as pending.';
+
+/** Inclusive window for the picked team's absolute point spread. */
+const SPREAD_ABS_MIN = 4;
+const SPREAD_ABS_MAX = 9;
+
+/**
+ * Frozen or stored line wins when the game already carries one.
+ * gradeAts reads spread_line, so the chosen line is copied there before grading.
+ */
+const STORED_SPREAD_KEYS = ['spread_frozen', 'frozen_spread', 'spread_close', 'closing_spread', 'stored_spread'];
 
 const AI_PICKS_GLOSSARY = 'AI Picks are the stored snapshots on each game (frozen at kickoff when a freeze was saved), not a fresh recompute. ATS and over/under are graded separately with the same cover and total rules as wagers. Passes are not graded. Only final games count. A week with no final games shows as Pending.';
 
@@ -48,6 +61,7 @@ function registerCriterion(def) {
     glossary: def.glossary || def.description || '',
     markets: Array.isArray(def.markets) && def.markets.length ? def.markets.slice() : ['ats'],
     singlePick: Boolean(def.singlePick),
+    pickList: Boolean(def.pickList),
     showCurrent: Boolean(def.showCurrent),
     assumption: Boolean(def.assumption),
     prepare: typeof def.prepare === 'function' ? def.prepare : null,
@@ -112,94 +126,136 @@ function settled(game, market, selection) {
   return graded.result;
 }
 
-function enteringRecord(seasonGames, team, season, beforeMs) {
-  let wins = 0;
-  let losses = 0;
-  let ties = 0;
-  for (const game of seasonGames) {
-    if (Number(game.season) !== Number(season) || !isReg(game)) continue;
-    if (game.home_team !== team && game.away_team !== team) continue;
-    const kick = Date.parse(game.kickoff);
-    if (!Number.isFinite(kick) || kick >= beforeMs) continue;
-    const letter = resultLetter(team, game);
-    if (letter === 'W') wins += 1;
-    else if (letter === 'L') losses += 1;
-    else if (letter === 'T') ties += 1;
-  }
-  const decided = wins + losses;
-  return {
-    wins,
-    losses,
-    ties,
-    decided,
-    label: ties ? `${wins}-${losses}-${ties}` : `${wins}-${losses}`,
-    rankPct: decided ? wins / decided : 0.5
-  };
+function formatSigned(n) {
+  const value = toNumber(n);
+  if (value == null) return null;
+  if (value === 0) return '0';
+  const shown = formatLine(Math.abs(value));
+  if (shown == null) return null;
+  return value > 0 ? `+${shown}` : `-${shown}`;
 }
 
-/** Points the team receives on the closing spread. Positive means underdog. */
-function pointsReceived(game, team) {
-  const spread = toNumber(game.spread_line);
-  if (spread == null) return null;
+function resultLabel(result) {
+  if (result === 'win') return 'W';
+  if (result === 'loss') return 'L';
+  if (result === 'push') return 'P';
+  return 'Pending';
+}
+
+/**
+ * Line gradeAts should use. A frozen or stored line on the game wins;
+ * otherwise the current spread_line. Missing both is no line.
+ */
+function gradingSpread(game) {
+  if (!game) return { line: null, source: null };
+  for (const key of STORED_SPREAD_KEYS) {
+    if (game[key] == null || game[key] === '') continue;
+    const stored = toNumber(game[key]);
+    if (stored != null) return { line: stored, source: 'stored' };
+  }
+  const current = toNumber(game.spread_line);
+  if (current != null) return { line: current, source: 'current' };
+  return { line: null, source: null };
+}
+
+/** Points the team receives. Positive means underdog. Null when the team is not in the game. */
+function teamPointSpread(game, team, spreadLine) {
+  const spread = toNumber(spreadLine);
+  if (spread == null || !team) return null;
   if (team === game.home_team) return -spread;
   if (team === game.away_team) return spread;
   return null;
 }
 
-function weekStartMs(games) {
-  let min = Infinity;
-  for (const game of games) {
-    const kick = Date.parse(game.kickoff);
-    if (Number.isFinite(kick) && kick < min) min = kick;
-  }
-  return Number.isFinite(min) ? min : 0;
+function spreadInWindow(abs) {
+  return abs != null && abs >= SPREAD_ABS_MIN && abs <= SPREAD_ABS_MAX;
 }
 
-function worseThan(a, b) {
-  if (a.rec.rankPct !== b.rec.rankPct) return a.rec.rankPct < b.rec.rankPct;
-  if (a.dog !== b.dog) return a.dog > b.dog;
-  return String(a.team).localeCompare(String(b.team)) > 0;
-}
-
-function chooseBiggestLoser(seasonGames, weekGames, season) {
-  const start = weekStartMs(weekGames);
+/** Most recent final regular-season game for this team strictly before kickoff. */
+function mostRecentFinal(seasonGames, team, beforeMs) {
   let best = null;
-  for (const game of weekGames) {
-    for (const team of [game.away_team, game.home_team]) {
-      if (!team) continue;
-      const rec = enteringRecord(seasonGames, team, season, start);
-      const dog = pointsReceived(game, team);
-      const row = {
-        game,
-        team,
-        rec,
-        dog: dog == null ? Number.NEGATIVE_INFINITY : dog
-      };
-      if (!best || worseThan(row, best)) best = row;
+  let bestKick = -Infinity;
+  for (const game of seasonGames) {
+    if (!team || (game.home_team !== team && game.away_team !== team)) continue;
+    if (!isReg(game) || !scoresReady(game)) continue;
+    const kick = Date.parse(game.kickoff);
+    if (!Number.isFinite(kick) || kick >= beforeMs) continue;
+    const id = String(game.game_id || '');
+    const bestId = best ? String(best.game_id || '') : '';
+    if (kick > bestKick || (kick === bestKick && id > bestId)) {
+      best = game;
+      bestKick = kick;
     }
   }
-  if (!best) return null;
+  return best;
+}
+
+function previousMargin(team, prev) {
+  if (!prev || !team) return null;
+  const teamScore = prev.home_team === team ? toNumber(prev.home_score) : toNumber(prev.away_score);
+  const oppScore = prev.home_team === team ? toNumber(prev.away_score) : toNumber(prev.home_score);
+  if (teamScore == null || oppScore == null) return null;
+  const opponent = prev.home_team === team ? prev.away_team : prev.home_team;
   return {
-    game_id: best.game.game_id,
-    team: best.team,
-    week: Number(best.game.week),
-    record: best.rec.label,
-    label: formatAtsPick(best.team, best.game),
-    detail: `${best.team} entered ${best.rec.label} before this week`
+    margin: teamScore - oppScore,
+    teamScore,
+    oppScore,
+    opponent,
+    week: Number(prev.week)
+  };
+}
+
+/**
+ * Pick for one game, or null when the game does not qualify.
+ * Both teams need a previous final. Equal signed margins are a skip.
+ * The picked side must be getting 4 to 9 points in absolute value.
+ */
+function pickBiggestLoserGame(seasonGames, game) {
+  if (!game || !isReg(game) || !game.home_team || !game.away_team) return null;
+  const before = Date.parse(game.kickoff);
+  if (!Number.isFinite(before)) return null;
+  const sides = [];
+  for (const team of [game.away_team, game.home_team]) {
+    const prev = mostRecentFinal(seasonGames, team, before);
+    const margin = previousMargin(team, prev);
+    if (!margin) return null;
+    sides.push({ team, ...margin });
+  }
+  if (sides[0].margin === sides[1].margin) return null;
+  const picked = sides[0].margin < sides[1].margin ? sides[0] : sides[1];
+  const graded = gradingSpread(game);
+  const teamSpread = teamPointSpread(game, picked.team, graded.line);
+  if (teamSpread == null || !spreadInWindow(Math.abs(teamSpread))) return null;
+  const gradingGame = { ...game, spread_line: graded.line };
+  const marginLabel = formatSigned(picked.margin);
+  const spreadLabel = formatSigned(teamSpread);
+  return {
+    market: 'ats',
+    selection: picked.team,
+    label: formatAtsPick(picked.team, gradingGame),
+    detail: `${picked.team} previous margin ${marginLabel} (${picked.team} ${picked.teamScore}-${picked.oppScore} vs ${picked.opponent}, week ${picked.week}). Spread ${spreadLabel}.`,
+    result: settled(gradingGame, 'ats', picked.team),
+    team: picked.team,
+    margin: picked.margin,
+    marginLabel,
+    spread: teamSpread,
+    spreadLabel,
+    spreadSource: graded.source,
+    opponent: `${game.away_team} @ ${game.home_team}`,
+    prevOpponent: picked.opponent,
+    prevWeek: picked.week,
+    prevScore: `${picked.teamScore}-${picked.oppScore}`,
+    game_id: game.game_id,
+    kickoff: game.kickoff,
+    week: Number(game.week)
   };
 }
 
 function prepareBiggestLoser(ctx) {
-  const byWeek = new Map();
-  for (const game of ctx.seasonGames) {
-    const week = Number(game.week);
-    if (!byWeek.has(week)) byWeek.set(week, []);
-    byWeek.get(week).push(game);
-  }
   const picks = new Map();
-  for (const [week, games] of byWeek) {
-    const choice = chooseBiggestLoser(ctx.seasonGames, games, ctx.season);
-    if (choice) picks.set(week, choice);
+  for (const game of ctx.seasonGames) {
+    const leg = pickBiggestLoserGame(ctx.seasonGames, game);
+    if (leg) picks.set(game.game_id, leg);
   }
   return picks;
 }
@@ -207,15 +263,37 @@ function prepareBiggestLoser(ctx) {
 function evaluateBiggestLoser(game, ctx) {
   const picks = ctx.prepared;
   if (!picks || typeof picks.get !== 'function') return [];
-  const choice = picks.get(Number(game.week));
-  if (!choice || choice.game_id !== game.game_id) return [];
-  return [{
-    market: 'ats',
-    selection: choice.team,
-    label: choice.label,
-    detail: choice.detail,
-    result: settled(game, 'ats', choice.team)
-  }];
+  const leg = picks.get(game.game_id);
+  return leg ? [leg] : [];
+}
+
+function pickRowFromLeg(leg) {
+  return {
+    game_id: leg.game_id || null,
+    week: leg.week != null ? Number(leg.week) : null,
+    team: leg.team || leg.selection || null,
+    label: leg.label || null,
+    detail: leg.detail || null,
+    margin: leg.margin != null ? leg.margin : null,
+    marginLabel: leg.marginLabel || null,
+    spread: leg.spread != null ? leg.spread : null,
+    spreadLabel: leg.spreadLabel || null,
+    spreadSource: leg.spreadSource || null,
+    result: leg.result || null,
+    resultLabel: resultLabel(leg.result),
+    opponent: leg.opponent || null,
+    prevOpponent: leg.prevOpponent || null,
+    prevWeek: leg.prevWeek != null ? leg.prevWeek : null,
+    prevScore: leg.prevScore || null,
+    kickoff: leg.kickoff || null
+  };
+}
+
+function comparePicks(a, b) {
+  const ka = Date.parse(a.kickoff) || 0;
+  const kb = Date.parse(b.kickoff) || 0;
+  if (ka !== kb) return ka - kb;
+  return String(a.team || '').localeCompare(String(b.team || ''));
 }
 
 function parsePick(row) {
@@ -272,12 +350,11 @@ registerCriterion({
 registerCriterion({
   id: 'biggest-loser',
   name: 'Biggest Loser Picks',
-  summary: 'Worst record entering the week, graded ATS',
+  summary: 'Per game: lowest previous margin, absolute spread 4 to 9, graded ATS',
   glossary: BIGGEST_LOSER_GLOSSARY,
   description: BIGGEST_LOSER_GLOSSARY,
   markets: ['ats'],
-  singlePick: true,
-  assumption: true,
+  pickList: true,
   prepare: prepareBiggestLoser,
   evaluate: evaluateBiggestLoser
 });
@@ -303,6 +380,7 @@ function buildCriterionReport(criterion, ctxBase) {
     const games = byWeek.get(week);
     const finals = games.filter((game) => scoresReady(game)).length;
     const legs = [];
+    const picks = [];
     let pick = null;
     let pickDetail = null;
     for (const game of games) {
@@ -314,8 +392,10 @@ function buildCriterionReport(criterion, ctxBase) {
           pick = leg.label;
           pickDetail = leg.detail || null;
         }
+        if (criterion.pickList) picks.push(pickRowFromLeg(leg));
       }
     }
+    if (criterion.pickList) picks.sort(comparePicks);
     let gradedAny = false;
     let ungradedAny = false;
     const markets = {};
@@ -353,7 +433,7 @@ function buildCriterionReport(criterion, ctxBase) {
         addTally(yearMarkets[market], tally);
       }
     }
-    weeks.push({
+    const weekRow = {
       week,
       pending,
       games: games.length,
@@ -361,7 +441,9 @@ function buildCriterionReport(criterion, ctxBase) {
       pick,
       pickDetail,
       markets
-    });
+    };
+    if (criterion.pickList) weekRow.picks = picks;
+    weeks.push(weekRow);
   }
   return {
     id: criterion.id,
@@ -371,6 +453,7 @@ function buildCriterionReport(criterion, ctxBase) {
     glossary: criterion.glossary,
     markets: criterion.markets,
     singlePick: criterion.singlePick,
+    pickList: criterion.pickList,
     showCurrent: criterion.showCurrent,
     assumption: criterion.assumption,
     weeks,
@@ -399,10 +482,11 @@ function buildPerformance({ games, season, seasons, aiRows, currentSeason }) {
 module.exports = {
   BIGGEST_LOSER_GLOSSARY,
   AI_PICKS_GLOSSARY,
+  SPREAD_ABS_MIN,
+  SPREAD_ABS_MAX,
   registerCriterion,
   listCriteria,
-  chooseBiggestLoser,
-  enteringRecord,
-  pointsReceived,
+  gradingSpread,
+  pickBiggestLoserGame,
   buildPerformance
 };
