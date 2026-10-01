@@ -97,6 +97,7 @@
     performanceSeason: null,
     performanceCriterion: 'ai-picks',
     performanceSort: { key: 'week', dir: 'asc' },
+    performancePickSort: { key: 'week', dir: 'asc' },
     shareGame: null,
     shareSeason: null,
     shareMissing: false,
@@ -2662,6 +2663,94 @@
     return `<div class="perf-current">${bits.join('')}</div>`;
   }
 
+  function perfPickColumns() {
+    return [
+      { key: 'week', label: 'Week', title: 'NFL week number for this pick' },
+      { key: 'team', label: 'Team', title: 'Team picked for this game: the side with the lower signed margin from its previous game' },
+      { key: 'margin', label: 'Previous margin', title: 'Signed margin of the picked team’s most recent final game earlier this season. Team points minus opponent points. A win is positive, a loss is negative, and a bye uses the last game played.' },
+      { key: 'spread', label: 'Spread', title: 'Picked team’s point spread for this game. Positive means points received. Absolute value must be from 4 through 9. Uses the frozen or stored line when present, otherwise the current line.' },
+      { key: 'result', label: 'Result', title: 'ATS result for a final game: W is a cover, L is a miss, P is a push. Pending means the game is not final and is not graded.' }
+    ];
+  }
+
+  function perfPickSortValue(row, key) {
+    if (key === 'week') return row.week;
+    if (key === 'team') return row.team || null;
+    if (key === 'margin') return row.margin != null ? row.margin : null;
+    if (key === 'spread') return row.spread != null ? row.spread : null;
+    if (key === 'result') {
+      if (row.result === 'win') return 3;
+      if (row.result === 'push') return 2;
+      if (row.result === 'loss') return 1;
+      return null;
+    }
+    return null;
+  }
+
+  function sortPerfPicks(picks) {
+    const { key, dir } = state.performancePickSort;
+    const mul = dir === 'asc' ? 1 : -1;
+    return [...(picks || [])].sort((a, b) => {
+      const av = perfPickSortValue(a, key);
+      const bv = perfPickSortValue(b, key);
+      if (av == null && bv == null) return (a.week - b.week) || String(a.team || '').localeCompare(String(b.team || ''));
+      if (av == null) return 1;
+      if (bv == null) return -1;
+      if (typeof av === 'string') {
+        const cmp = av.localeCompare(bv);
+        if (cmp) return cmp * mul;
+      } else if (av !== bv) return (av - bv) * mul;
+      const ka = Date.parse(a.kickoff) || 0;
+      const kb = Date.parse(b.kickoff) || 0;
+      if (ka !== kb) return ka - kb;
+      return String(a.team || '').localeCompare(String(b.team || ''));
+    });
+  }
+
+  function flattenPerfPicks(weeks) {
+    const rows = [];
+    for (const week of weeks || []) {
+      for (const pick of week.picks || []) {
+        rows.push({ ...pick, week: pick.week != null ? pick.week : week.week });
+      }
+    }
+    return rows;
+  }
+
+  function perfResultClass(result) {
+    if (result === 'win') return 'perf-result-win';
+    if (result === 'loss') return 'perf-result-loss';
+    if (result === 'push') return 'perf-result-push';
+    return 'perf-result-pending';
+  }
+
+  function perfPickList(criterion) {
+    if (!criterion.pickList) return '';
+    const cols = perfPickColumns();
+    const rows = sortPerfPicks(flattenPerfPicks(criterion.weeks));
+    const body = rows.map((row) => {
+      const marginTitle = row.detail || 'No previous-game margin';
+      return `<tr>
+        <td>${esc(row.week)}</td>
+        <td title="${esc(row.opponent || row.team || '')}">${esc(row.team || '—')}</td>
+        <td title="${esc(marginTitle)}">${esc(row.marginLabel || '—')}</td>
+        <td title="${esc(row.spreadSource === 'stored' ? 'Frozen or stored line' : 'Current line')}">${esc(row.spreadLabel || '—')}</td>
+        <td class="${perfResultClass(row.result)}" title="${esc(row.resultLabel === 'Pending' ? 'Game is not final, so this pick is not graded' : 'Graded against the spread')}">${esc(row.resultLabel || 'Pending')}</td>
+      </tr>`;
+    }).join('');
+    const empty = '<tr><td colspan="5">No qualifying picks for this season.</td></tr>';
+    return `<div class="perf-picks">
+      <h2>Picks by game</h2>
+      <p class="lede">One row per qualifying game. A week can have several picks. Unfinished games stay Pending and are not in the week record yet.</p>
+      <div class="perf-table-wrap">
+        <table class="hist-table perf-table perf-pick-table">
+          <thead><tr>${cols.map((col) => `<th data-perf-pick-sort="${esc(col.key)}" title="${esc(col.title)}" class="${state.performancePickSort.key === col.key ? 'sorted' : ''}">${esc(col.label)}${state.performancePickSort.key === col.key ? `<span class="caret">${state.performancePickSort.dir === 'asc' ? '▲' : '▼'}</span>` : ''}</th>`).join('')}</tr></thead>
+          <tbody>${body || empty}</tbody>
+        </table>
+      </div>
+    </div>`;
+  }
+
   function perfYearLine(criterion) {
     const parts = (criterion.markets || []).map((market) => {
       const tally = criterion.year && criterion.year.markets && criterion.year.markets[market];
@@ -2733,7 +2822,7 @@
       <div class="perf-table-wrap">
         <table class="hist-table perf-table">
           <thead><tr>${cols.map((col) => `<th data-perf-sort="${esc(col.key)}" title="${esc(col.title)}" class="${state.performanceSort.key === col.key ? 'sorted' : ''}">${esc(col.label)}${state.performanceSort.key === col.key ? `<span class="caret">${state.performanceSort.dir === 'asc' ? '▲' : '▼'}</span>` : ''}</th>`).join('')}</tr></thead>
-          <tbody>${body || '<tr><td colspan="6">No weeks for this season.</td></tr>'}</tbody>
+          <tbody>${body || `<tr><td colspan="${cols.length}">No weeks for this season.</td></tr>`}</tbody>
           <tfoot><tr class="perf-total">
             <td title="${esc(yearTitle)}">Season</td>
             ${criterion.singlePick ? '<td title="One pick per week, totaled below in ATS">—</td>' : ''}
@@ -2741,6 +2830,7 @@
           </tr></tfoot>
         </table>
       </div>
+      ${perfPickList(criterion)}
     </section>`;
   }
 
@@ -2832,6 +2922,7 @@
       if (perfTab && state.page === 'performance') {
         state.performanceCriterion = perfTab.dataset.perfCriterion;
         state.performanceSort = { key: 'week', dir: 'asc' };
+        state.performancePickSort = { key: 'week', dir: 'asc' };
         render();
         return;
       }
@@ -2869,6 +2960,14 @@
         const key = sort.dataset.sort;
         if (state.sort.key === key) state.sort.dir = state.sort.dir === 'asc' ? 'desc' : 'asc';
         else state.sort = { key, dir: key === 'username' ? 'asc' : 'desc' };
+        render();
+        return;
+      }
+      const perfPickSort = e.target.closest('th[data-perf-pick-sort]');
+      if (perfPickSort && state.page === 'performance') {
+        const key = perfPickSort.dataset.perfPickSort;
+        if (state.performancePickSort.key === key) state.performancePickSort.dir = state.performancePickSort.dir === 'asc' ? 'desc' : 'asc';
+        else state.performancePickSort = { key, dir: key === 'week' || key === 'team' ? 'asc' : 'desc' };
         render();
         return;
       }

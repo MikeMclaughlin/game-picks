@@ -406,6 +406,12 @@ h1, h2 { margin: 0 0 8px; font-size: 22px; font-weight: 700; letter-spacing: 0.0
 .perf-table-wrap { overflow-x: auto; }
 .perf-table th, .perf-table td { white-space: nowrap; }
 .perf-total td { font-weight: 800; color: var(--gold); border-top: 2px solid var(--gold); }
+.perf-picks { margin-top: 18px; }
+.perf-picks h2 { font-size: 16px; margin: 0 0 6px; }
+.perf-picks .lede { margin-bottom: 8px; }
+.perf-result-win { color: var(--green); font-weight: 700; }
+.perf-result-loss { color: var(--red); font-weight: 700; }
+.perf-result-push, .perf-result-pending { color: var(--muted); font-weight: 700; }
 .game-missing .chip { margin-top: 4px; }
 .filters { display: flex; gap: 6px; flex-wrap: wrap; margin: 0 0 10px; }
 .weekbar { display: flex; gap: 8px; align-items: center; margin: 0 0 10px; flex-wrap: wrap; }
