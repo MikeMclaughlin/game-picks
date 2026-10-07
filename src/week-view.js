@@ -764,35 +764,31 @@ function guardTotal(game, projection, ouRaw, ouDisplay, passes) {
   const edge = ouEdgePoints(projection, game);
   const tnf = isThursdayNight(game);
   const high = total != null && total >= HIGH_TOTAL;
+  const reasons = [];
   if (ou && isEarlyWeek(game) && (edge == null || edge < EARLY_EDGE)) {
-    ouNote = 'pass O/U — early season';
-    logPass(passes, { rule: 'early-season', market: 'ou', selection: ou, note: ouNote });
-    return { ou: null, ouNote, ouShown: null, ouRaw: null };
+    reasons.push({ rule: 'early-season', market: 'ou', selection: ou, note: 'pass O/U — early season' });
   }
   if (ou && isWeekFourPlus(game) && edge != null && edge < OU_SMALL_EDGE) {
-    ouNote = 'pass O/U — small edge';
-    logPass(passes, { rule: 'small-edge-ou', market: 'ou', selection: ou, note: ouNote });
-    return { ou: null, ouNote, ouShown: null, ouRaw: null };
+    reasons.push({ rule: 'small-edge-ou', market: 'ou', selection: ou, note: 'pass O/U — small edge' });
   }
   if (ou === 'over' && total != null && total >= OVER_PASS_TOTAL && (edge == null || edge < OVER_KEEP_EDGE)) {
-    ouNote = 'pass over — total 48+';
-    logPass(passes, { rule: 'over-48', market: 'ou', selection: 'over', note: ouNote });
-    return { ou: null, ouNote, ouShown: null, ouRaw: null };
+    reasons.push({ rule: 'over-48', market: 'ou', selection: 'over', note: 'pass over — total 48+' });
   }
   if (ou === 'under' && tnf) {
-    ouNote = 'pass under — TNF';
-    logPass(passes, { rule: 'tnf-under', market: 'ou', selection: 'under', note: ouNote });
-    if (high && (!projection.hasHistory || ouRaw >= UNDER_VETO_RAW)) {
-      logPass(passes, { rule: 'under-50', market: 'ou', selection: 'under', note: 'pass under — total 50+' });
-    }
+    reasons.push({ rule: 'tnf-under', market: 'ou', selection: 'under', note: 'pass under — TNF' });
+  }
+  const under50Hard = ou === 'under' && high && (!projection.hasHistory || ouRaw >= UNDER_VETO_RAW);
+  if (under50Hard) {
+    reasons.push({ rule: 'under-50', market: 'ou', selection: 'under', note: 'pass under — total 50+' });
+  }
+  if (reasons.length) {
+    const preferred = ['tnf-under', 'early-season', 'over-48', 'under-50', 'small-edge-ou'];
+    const lead = preferred.map((id) => reasons.find((row) => row.rule === id)).find(Boolean) || reasons[0];
+    ouNote = lead.note;
+    for (const row of reasons) logPass(passes, row);
     return { ou: null, ouNote, ouShown: null, ouRaw: null };
   }
   if (ou === 'under' && high) {
-    if (!projection.hasHistory || ouRaw >= UNDER_VETO_RAW) {
-      ouNote = 'pass under — total 50+';
-      logPass(passes, { rule: 'under-50', market: 'ou', selection: 'under', note: ouNote });
-      return { ou: null, ouNote, ouShown: null, ouRaw: null };
-    }
     shown = Math.max(51, Math.min(UNDER_CONF_CAP, display - UNDER_DISCOUNT));
     ouNote = 'under discounted — total 50+';
   }
@@ -1036,16 +1032,28 @@ function aiPick(game, projection, options = {}) {
     const spread = toNumber(game.spread_line);
     sideTeam = spread > 0 ? game.away_team : game.home_team;
   }
-  let sides;
+  let earlyAts = false;
   if (isEarlyWeek(game) && sideTeam) {
     const edge = atsEdgePoints(proj, game);
     if (edge == null || edge < EARLY_EDGE) {
-      const note = 'pass ATS — early season';
-      logPass(passes, { rule: 'early-season', market: 'ats', selection: sideTeam, note });
-      sides = { atsTeam: null, mlTeam: null, atsNote: note, atsMarket: 'pass' };
+      earlyAts = true;
+      logPass(passes, {
+        rule: 'early-season',
+        market: 'ats',
+        selection: sideTeam,
+        note: 'pass ATS — early season'
+      });
     }
   }
-  if (!sides) sides = guardSides(game, proj, sideTeam, { passes, seasonAts: options.seasonAts });
+  let sides = guardSides(game, proj, sideTeam, { passes, seasonAts: options.seasonAts });
+  if (earlyAts && sides.atsTeam) {
+    sides = {
+      atsTeam: null,
+      mlTeam: null,
+      atsNote: 'pass ATS — early season',
+      atsMarket: 'pass'
+    };
+  }
   const rawAts = sides.atsTeam ? aiConfidence(game, proj) : null;
   const rawOuBase = proj.ou ? ouConfidenceRaw(game, proj) : null;
   const map = options.map === undefined
