@@ -115,7 +115,7 @@ test('backtestPayload reports N, small-N flag, lift, expected calls, and CSV', (
   const row = payload.games.find((g) => g.game_id === 'c');
   assert.ok(row.expected);
   assert.match(row.expected, / and /);
-  assert.equal(row.gameDate, '2024-09-22 13:00 EST');
+  assert.equal(row.gameDate, '09/22/2024 13:00 EST');
   assert.equal(typeof row.confidence, 'number');
   assert.ok(row.confidence >= 1 && row.confidence <= 99);
   assert.ok(row.rawConfidence >= 51 && row.rawConfidence <= 92);
@@ -128,7 +128,7 @@ test('backtestPayload reports N, small-N flag, lift, expected calls, and CSV', (
   assert.match(csv, /date,season,week,away,home/);
   assert.match(csv, /expected,confidence/);
   assert.doesNotMatch(csv, /expected_joint/);
-  assert.match(csv, /2024-09-08 13:00 EST/);
+  assert.match(csv, /09\/08\/2024 13:00 EST/);
   assert.match(csv, /BUF/);
   assert.equal(row.matchup, 'NYJ @ BUF');
   assert.equal(row.opponent, 'NYJ @ BUF');

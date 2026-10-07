@@ -1,7 +1,8 @@
 'use strict';
 
-const { gradeAts, gradeOu, scoresReady, toNumber } = require('./grader');
-const { formatAtsPick, formatLine } = require('./week-view');
+const { gradeAts, gradeOu, scoresReady, toNumber, atsLetter } = require('./grader');
+const { formatAtsPick, formatLine, aiPick, projectGameFromRates, applyGameToRates } = require('./week-view');
+const { HISTORY_FROM_SEASON } = require('./seasons');
 
 /**
  * Pick-performance criteria.
@@ -64,6 +65,7 @@ function registerCriterion(def) {
     pickList: Boolean(def.pickList),
     showCurrent: Boolean(def.showCurrent),
     assumption: Boolean(def.assumption),
+    pickColumns: Array.isArray(def.pickColumns) ? def.pickColumns : null,
     prepare: typeof def.prepare === 'function' ? def.prepare : null,
     evaluate: def.evaluate
   };
@@ -355,9 +357,261 @@ registerCriterion({
   description: BIGGEST_LOSER_GLOSSARY,
   markets: ['ats'],
   pickList: true,
+  pickColumns: [
+    { key: 'week', label: 'Week', title: 'NFL week number for this pick' },
+    { key: 'team', label: 'Team', title: 'Team picked for this game: the side with the lower signed margin from its previous game' },
+    { key: 'margin', label: 'Previous margin', title: 'Signed margin of the picked team’s most recent final game earlier this season. Team points minus opponent points. A win is positive, a loss is negative, and a bye uses the last game played.' },
+    { key: 'spread', label: 'Spread', title: 'Picked team’s point spread for this game. Positive means points received. Absolute value must be from 4 through 9. Uses the frozen or stored line when present, otherwise the current line.' },
+    { key: 'result', label: 'Result', title: 'ATS result for a final game: W is a cover, L is a miss, P is a push. Pending means the game is not final and is not graded.' }
+  ],
   prepare: prepareBiggestLoser,
   evaluate: evaluateBiggestLoser
 });
+
+/**
+ * Comeback Kid — ATS any underdog whose previous same-season game missed
+ * the spread by 21 or more. ATS margin is team score margin plus the points
+ * that team was getting. Graded on the frozen or stored line, else the current line.
+ */
+const COMEBACK_KID_GLOSSARY = 'Comeback Kid is scored on each regular-season game. A team qualifies when it is the underdog in this game (getting points; a pick’em is not a dog) and its previous final game in the same season missed the spread by 21 or more points. That previous ATS margin is the team’s score margin plus the points it was getting (team margin + team line). A margin of -21 or lower qualifies. The pick is graded ATS on this week’s frozen or stored line when the game has one, otherwise the current line. Only final games are graded. An unfinished game that has a pick shows as pending.';
+
+function previousAtsMargin(team, prev) {
+  const scored = previousMargin(team, prev);
+  if (!scored) return null;
+  const graded = gradingSpread(prev);
+  const line = teamPointSpread(prev, team, graded.line);
+  if (line == null) return null;
+  return { ...scored, atsMargin: scored.margin + line, prevLine: line };
+}
+
+function pickComebackKidGame(seasonGames, game) {
+  if (!game || !isReg(game) || !game.home_team || !game.away_team) return null;
+  const before = Date.parse(game.kickoff);
+  if (!Number.isFinite(before)) return null;
+  const graded = gradingSpread(game);
+  let picked = null;
+  for (const team of [game.away_team, game.home_team]) {
+    const dogLine = teamPointSpread(game, team, graded.line);
+    if (dogLine == null || dogLine <= 0) continue;
+    const prev = mostRecentFinal(seasonGames, team, before);
+    const prevAts = previousAtsMargin(team, prev);
+    if (!prevAts || prevAts.atsMargin > -21) continue;
+    picked = { team, dogLine, ...prevAts };
+    break;
+  }
+  if (!picked) return null;
+  const gradingGame = graded.line == null ? game : { ...game, spread_line: graded.line };
+  const marginLabel = formatSigned(picked.atsMargin);
+  const spreadLabel = formatSigned(picked.dogLine);
+  return {
+    market: 'ats',
+    selection: picked.team,
+    label: formatAtsPick(picked.team, gradingGame),
+    detail: `${picked.team} previous ATS margin ${marginLabel} (score margin ${formatSigned(picked.margin)} plus line ${formatSigned(picked.prevLine)} vs ${picked.opponent}, week ${picked.week}). This week ${spreadLabel}.`,
+    result: settled(gradingGame, 'ats', picked.team),
+    team: picked.team,
+    margin: picked.atsMargin,
+    marginLabel,
+    spread: picked.dogLine,
+    spreadLabel,
+    spreadSource: graded.source,
+    opponent: `${game.away_team} @ ${game.home_team}`,
+    prevOpponent: picked.opponent,
+    prevWeek: picked.week,
+    prevScore: `${picked.teamScore}-${picked.oppScore}`,
+    game_id: game.game_id,
+    kickoff: game.kickoff,
+    week: Number(game.week)
+  };
+}
+
+function prepareComebackKid(ctx) {
+  const picks = new Map();
+  for (const game of ctx.seasonGames) {
+    const leg = pickComebackKidGame(ctx.seasonGames, game);
+    if (leg) picks.set(game.game_id, leg);
+  }
+  return picks;
+}
+
+function evaluateComebackKid(game, ctx) {
+  const picks = ctx.prepared;
+  if (!picks || typeof picks.get !== 'function') return [];
+  const leg = picks.get(game.game_id);
+  return leg ? [leg] : [];
+}
+
+registerCriterion({
+  id: 'comeback-kid',
+  name: 'Comeback Kid',
+  summary: 'ATS underdog after missing the spread by 21 or more last game',
+  glossary: COMEBACK_KID_GLOSSARY,
+  description: COMEBACK_KID_GLOSSARY,
+  markets: ['ats'],
+  pickList: true,
+  pickColumns: [
+    { key: 'week', label: 'Week', title: 'NFL week number for this pick' },
+    { key: 'team', label: 'Team', title: 'Underdog picked ATS after missing the spread by 21 or more in its previous same-season game' },
+    { key: 'margin', label: 'Previous ATS margin', title: 'Previous-game ATS margin: team score margin plus the points that team was getting. Qualifying picks are -21 or lower.' },
+    { key: 'spread', label: 'Spread', title: 'Points this underdog is getting this week. Positive means points received. Graded on the frozen or stored line when present, otherwise the current line.' },
+    { key: 'result', label: 'Result', title: 'ATS result for a final game: W is a cover, L is a miss, P is a push. Pending means the game is not final and is not graded.' }
+  ],
+  prepare: prepareComebackKid,
+  evaluate: evaluateComebackKid
+});
+
+const PASS_RULES = [
+  { id: 'plus-10-dog', name: '+10 dog ban', markets: ['ats'] },
+  { id: 'plus-9-dog', name: '+9 dog pass', markets: ['ats'] },
+  { id: 'tnf-under', name: 'TNF under veto', markets: ['ou'] },
+  { id: 'under-50', name: '50+ under pass', markets: ['ou'] },
+  { id: 'over-48', name: '48+ over pass', markets: ['ou'] },
+  { id: 'small-edge-ou', name: 'Small-edge O/U pass', markets: ['ou'] },
+  { id: 'early-season', name: 'Early-season pass', markets: ['ats', 'ou'] },
+  { id: 'side-flip', name: 'Side-flip pass', markets: ['ats'] },
+  { id: 'heavy-dog-losing', name: 'Heavy dog, losing ATS record', markets: ['ats'] }
+];
+
+function gradePassLeg(game, pass) {
+  if (!pass || !pass.selection) return null;
+  if (pass.market === 'ou') return settled(game, 'ou', pass.selection);
+  const graded = gradingSpread(game);
+  const gradingGame = graded.line == null ? game : { ...game, spread_line: graded.line };
+  return settled(gradingGame, 'ats', pass.selection);
+}
+
+function emptyAtsRec() {
+  return { covers: 0, fails: 0 };
+}
+
+function sideFlipPasses(row) {
+  const payload = parsePick(row);
+  if (!payload) return [];
+  const listed = Array.isArray(payload.passes) ? payload.passes.filter((item) => item && item.rule === 'side-flip' && item.selection) : [];
+  if (listed.length) return listed.map((item) => ({ ...item, market: 'ats', rule: 'side-flip' }));
+  if (payload.atsFlipped && payload.wouldHaveAtsTeam) {
+    return [{ rule: 'side-flip', market: 'ats', selection: payload.wouldHaveAtsTeam, note: 'pass ATS — side flipped' }];
+  }
+  return [];
+}
+
+function replayPassEvents(games, season, aiById) {
+  const sorted = [...(games || [])]
+    .filter((game) => String(game.game_type || 'REG').toUpperCase() !== 'PRE' && Number(game.season) >= HISTORY_FROM_SEASON && Number(game.season) <= Number(season))
+    .sort((a, b) => Date.parse(a.kickoff) - Date.parse(b.kickoff) || String(a.game_id).localeCompare(String(b.game_id)));
+  const rates = new Map();
+  const records = new Map();
+  const events = [];
+  for (const game of sorted) {
+    const seasonAts = {};
+    for (const team of [game.home_team, game.away_team]) {
+      seasonAts[team] = records.get(`${game.season}|${team}`) || emptyAtsRec();
+    }
+    const inSeason = Number(game.season) === Number(season) && isReg(game);
+    if (inSeason) {
+      const projection = projectGameFromRates(game, rates.get(game.home_team), rates.get(game.away_team));
+      const pick = aiPick(game, projection, { calibrate: false, seasonAts });
+      for (const pass of pick.passes || []) {
+        if (!pass || !pass.rule || !pass.selection) continue;
+        events.push({
+          rule: pass.rule,
+          market: pass.market,
+          selection: pass.selection,
+          week: Number(game.week),
+          result: gradePassLeg(game, pass),
+          game_id: game.game_id
+        });
+      }
+      const row = aiById && aiById.get(game.game_id);
+      for (const pass of sideFlipPasses(row)) {
+        events.push({
+          rule: 'side-flip',
+          market: 'ats',
+          selection: pass.selection,
+          week: Number(game.week),
+          result: gradePassLeg(game, { market: 'ats', selection: pass.selection }),
+          game_id: game.game_id
+        });
+      }
+    }
+    if (scoresReady(game)) {
+      applyGameToRates(rates, game);
+      for (const team of [game.home_team, game.away_team]) {
+        const key = `${game.season}|${team}`;
+        const rec = records.get(key) || emptyAtsRec();
+        const letter = atsLetter(game, team);
+        if (letter === 'C') rec.covers += 1;
+        else if (letter === 'F') rec.fails += 1;
+        records.set(key, rec);
+      }
+    }
+  }
+  return events;
+}
+
+function buildPassReport(ctxBase) {
+  const events = replayPassEvents(ctxBase.games, ctxBase.season, ctxBase.aiById);
+  const weeksPresent = [...new Set(ctxBase.seasonGames.map((game) => Number(game.week)))].sort((a, b) => a - b);
+  const finalsByWeek = new Map();
+  for (const game of ctxBase.seasonGames) {
+    const week = Number(game.week);
+    if (!finalsByWeek.has(week)) finalsByWeek.set(week, 0);
+    if (scoresReady(game)) finalsByWeek.set(week, finalsByWeek.get(week) + 1);
+  }
+  const rules = PASS_RULES.map((rule) => {
+    const mine = events.filter((event) => event.rule === rule.id);
+    const year = { ats: freshTally(), ou: freshTally() };
+    const weeks = [];
+    for (const week of weeksPresent) {
+      const legs = mine.filter((event) => event.week === week);
+      if (!legs.length) continue;
+      const markets = { ats: freshTally(), ou: freshTally() };
+      let gradedAny = false;
+      let ungradedAny = false;
+      for (const leg of legs) {
+        const market = leg.market === 'ou' ? 'ou' : 'ats';
+        if (!rule.markets.includes(market)) continue;
+        if (leg.result) {
+          bump(markets[market], leg.result);
+          gradedAny = true;
+        } else ungradedAny = true;
+      }
+      const finals = finalsByWeek.get(week) || 0;
+      const pending = finals === 0 || (!gradedAny && ungradedAny);
+      if (pending) {
+        for (const market of rule.markets) {
+          markets[market] = {
+            wins: 0, losses: 0, pushes: 0, graded: 0, decided: 0, label: 'Pending', winPct: null, pending: true
+          };
+        }
+      } else {
+        for (const market of rule.markets) {
+          if (!markets[market].graded) markets[market] = { ...markets[market], pending: false, label: '—', winPct: null };
+          else {
+            markets[market] = { ...markets[market], pending: false };
+            addTally(year[market], markets[market]);
+          }
+        }
+      }
+      weeks.push({ week, pending, markets });
+    }
+    for (const market of ['ats', 'ou']) {
+      if (!rule.markets.includes(market)) {
+        year[market] = { wins: 0, losses: 0, pushes: 0, graded: 0, decided: 0, label: '—', winPct: null, pending: false };
+      } else if (!year[market].graded) {
+        year[market] = { ...finishTally(year[market]), label: '0-0', winPct: null, pending: false };
+      }
+    }
+    return {
+      id: rule.id,
+      name: rule.name,
+      markets: rule.markets,
+      weeks,
+      year: { markets: year }
+    };
+  });
+  return { rules };
+}
 
 function regSeasonGames(games, season) {
   return (games || []).filter((game) => Number(game.season) === Number(season) && isReg(game));
@@ -454,6 +708,7 @@ function buildCriterionReport(criterion, ctxBase) {
     markets: criterion.markets,
     singlePick: criterion.singlePick,
     pickList: criterion.pickList,
+    pickColumns: criterion.pickColumns,
     showCurrent: criterion.showCurrent,
     assumption: criterion.assumption,
     weeks,
@@ -470,12 +725,40 @@ function buildPerformance({ games, season, seasons, aiRows, currentSeason }) {
     aiById.set(row.game_id, row);
   }
   const ctxBase = { games, seasonGames, season: Number(season), aiById };
+  const reports = criteria.map((criterion) => buildCriterionReport(criterion, ctxBase));
   return {
     season: Number(season),
     currentSeason: Number(currentSeason),
     isCurrentSeason: Number(season) === Number(currentSeason),
     seasons: seasons || [],
-    criteria: criteria.map((criterion) => buildCriterionReport(criterion, ctxBase))
+    criteria: reports,
+    passes: buildPassReport(ctxBase)
+  };
+}
+
+function marketSnap(criterion, market) {
+  const tally = criterion && criterion.year && criterion.year.markets && criterion.year.markets[market];
+  if (!tally || !tally.graded) {
+    return { label: '0-0', winPct: null, wins: 0, losses: 0, pushes: 0 };
+  }
+  return {
+    label: tally.label,
+    winPct: tally.winPct,
+    wins: tally.wins,
+    losses: tally.losses,
+    pushes: tally.pushes
+  };
+}
+
+function performanceTotals(report) {
+  const list = (report && report.criteria) || [];
+  const byId = new Map(list.map((criterion) => [criterion.id, criterion]));
+  return {
+    season: report ? report.season : null,
+    aiAts: marketSnap(byId.get('ai-picks'), 'ats'),
+    aiOu: marketSnap(byId.get('ai-picks'), 'ou'),
+    biggestLoser: marketSnap(byId.get('biggest-loser'), 'ats'),
+    comebackKid: marketSnap(byId.get('comeback-kid'), 'ats')
   };
 }
 
@@ -488,5 +771,9 @@ module.exports = {
   listCriteria,
   gradingSpread,
   pickBiggestLoserGame,
-  buildPerformance
+  pickComebackKidGame,
+  COMEBACK_KID_GLOSSARY,
+  PASS_RULES,
+  buildPerformance,
+  performanceTotals
 };

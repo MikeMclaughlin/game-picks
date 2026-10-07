@@ -30,10 +30,10 @@ const { parseHistoryFilters, historyPayload } = require('./history');
 const { parseBacktestFilters, parseChain, backtestPayload, backtestCsv, wantsInjurySlice } = require('./backtest');
 const { loadStarterOutIndex } = require('./nflverse-injuries');
 const { listTeamAbbrs } = require('./teams');
-const { persistAiPicks, listAiPicks, applyAiSnapshots } = require('./ai-picks');
+const { persistAiPicks, listAiPicks, listAiPicksByGameIds, applyAiSnapshots } = require('./ai-picks');
 const { historyWindow } = require('./seasons');
 const { BUILD } = require('./build');
-const { buildPerformance } = require('./performance');
+const { buildPerformance, performanceTotals } = require('./performance');
 const { attachLiveScores, resolveLiveScores } = require('./espn-live');
 const { attachInjuries } = require('./espn-injuries');
 
@@ -274,15 +274,37 @@ async function serveAppDocument(req, res, url) {
 
 async function freezeWeekPicks(sql, cards, season, week) {
   if (!sql) return cards;
+  let snapped = null;
   try {
-    const rows = await listAiPicks(sql, { season, week });
-    const snapped = applyAiSnapshots(cards, rows);
+    const ids = [...new Set((cards || []).map((card) => card && card.game_id).filter(Boolean))];
+    let rows = ids.length ? await listAiPicksByGameIds(sql, ids) : [];
+    if (!rows.length) rows = await listAiPicks(sql, { season, week });
+    snapped = applyAiSnapshots(cards, rows);
     await persistAiPicks(sql, snapped);
     return snapped;
   } catch (err) {
     console.error('persist ai picks failed', err);
-    return cards;
+    return snapped || cards;
   }
+}
+
+async function loadPerformanceTotals(sql, games, season) {
+  let aiRows = [];
+  if (sql) {
+    try {
+      aiRows = await listAiPicks(sql, { season });
+    } catch (err) {
+      console.error('performance totals ai picks failed', err);
+    }
+  }
+  const report = buildPerformance({
+    games,
+    season,
+    seasons: [Number(season)],
+    aiRows,
+    currentSeason: season
+  });
+  return performanceTotals(report);
 }
 
 function sendFile(res, filePath) {
@@ -572,6 +594,7 @@ async function handleApi(req, res, url) {
     const liveAttach = await attachLiveScores(cards, { sql });
     const injuryAttach = await attachInjuries(liveAttach.cards, { sql });
     const presented = presentWeek(injuryAttach.cards, user);
+    const performanceTotalsPayload = await loadPerformanceTotals(sql, games, season);
     const poolId = user ? user.pool_id : sql ? (await getPool(sql)).id : null;
     const board = poolId ? await standings(sql, poolId, season, week) : [];
     return json(res, 200, {
@@ -587,6 +610,7 @@ async function handleApi(req, res, url) {
       weeks: weeksForSeason(games, season),
       games: presented.games,
       compare: presented.compare,
+      performanceTotals: performanceTotalsPayload,
       livePoll: Boolean(liveAttach.live && liveAttach.live.livePoll),
       liveReason: liveAttach.live && liveAttach.live.reason,
       standings: board.slice(0, 8),
@@ -633,6 +657,7 @@ async function handleApi(req, res, url) {
     const injuryAttach = await attachInjuries(liveAttach.cards, { sql });
     const presented = presentWeek(injuryAttach.cards, user);
     const weeks = weeksForSeason(games, season);
+    const performanceTotalsPayload = await loadPerformanceTotals(sql, games, season);
     return json(res, 200, {
       ok: true,
       db,
@@ -641,6 +666,7 @@ async function handleApi(req, res, url) {
       weeks,
       games: presented.games,
       compare: presented.compare,
+      performanceTotals: performanceTotalsPayload,
       livePoll: Boolean(liveAttach.live && liveAttach.live.livePoll),
       liveReason: liveAttach.live && liveAttach.live.reason,
       user: publicUser(user),

@@ -98,6 +98,7 @@
     performanceCriterion: 'ai-picks',
     performanceSort: { key: 'week', dir: 'asc' },
     performancePickSort: { key: 'week', dir: 'asc' },
+    performancePassSort: { key: 'rule', dir: 'asc' },
     shareGame: null,
     shareSeason: null,
     shareMissing: false,
@@ -1586,7 +1587,7 @@
     if (ouConf != null && Number.isFinite(Number(ouConf))) {
       parts.push({
         text: `O/U ${Math.round(Number(ouConf))}%`,
-        title: 'O/U confidence: separate edge/sample score for the total only (51–92 rule). Not the ATS hit-rate map and not a joint ATS+O/U probability.'
+        title: 'Calibrated historical O/U hit rate (2016+ scored games, isotonic reliability map, prior strength 12) for the total only. Not the ATS hit-rate map and not a joint ATS+O/U probability.'
       });
     }
     return parts;
@@ -1776,13 +1777,24 @@
     return `<span class="week-stat" title="${esc(title)}">${esc(label)} <strong${cls}>${esc(value)}</strong></span>`;
   }
 
+  function seasonPickText(rec) {
+    if (!rec || !rec.label) return '0-0';
+    if (rec.winPct == null) return rec.label;
+    return `${rec.label} · ${fmtPct(rec.winPct)}`;
+  }
+
   function weekBar(games) {
     const strip = myWeekStrip(games);
     const board = gradeWeekVersus(games, Boolean((state.week && state.week.user) || (state.bootstrap && state.bootstrap.user)));
+    const totals = (state.week && state.week.performanceTotals) || (state.bootstrap && state.bootstrap.performanceTotals) || {};
     const bits = [
       weekStat('Season points', fmtInt(strip.season), 'Season points from settled wagers', true),
       weekStat('Week points', fmtInt(strip.week), 'Points scored on this week’s settled wagers', false),
-      weekStat('Open picks', fmtInt(strip.locks), 'Games you have a wager on that are still open before kickoff', false)
+      weekStat('Open picks', fmtInt(strip.locks), 'Games you have a wager on that are still open before kickoff', false),
+      weekStat('Season AI ATS', seasonPickText(totals.aiAts), 'Season AI Picks against-the-spread record from Pick Performance', false),
+      weekStat('Season AI O/U', seasonPickText(totals.aiOu), 'Season AI Picks over/under record from Pick Performance', false),
+      weekStat('Biggest Loser', seasonPickText(totals.biggestLoser), 'Season Biggest Loser ATS record from Pick Performance', false),
+      weekStat('Comeback Kid', seasonPickText(totals.comebackKid), 'Season Comeback Kid ATS record from Pick Performance', false)
     ];
     if (!board.signedIn) {
       bits.push('<span class="week-note" title="Sign in to compare your graded ATS, over/under, and outright results with the AI for this week">Sign in to compare your week with the AI.</span>');
@@ -1797,7 +1809,7 @@
         bits.push(weekStat('Your outright', recordLabel(you.outright), 'Your graded outright record this week (W-L, or W-L-T with a tie)', false));
       }
     }
-    return `<div class="week-bar" title="Season points, this week’s points, open wagers, and graded results versus the AI">${bits.join('')}</div>`;
+    return `<div class="week-bar" title="Season points, this week’s points, open wagers, Pick Performance season totals, and graded results versus the AI">${bits.join('')}</div>`;
   }
 
   function myWeekStrip(games) {
@@ -1846,7 +1858,7 @@
       <span><b>OVER / UNDER</b> the total. The line reads take the OVER or take the UNDER, then the number.</span>
       <span><b>pass UNDER / pass OVER</b> no total pick. The reason after the dash can be TNF, total 50+, or both. This app writes pass UNDER for those spots.</span>
       <span><b>under discounted</b> still an under, with lower confidence, for TNF or a total 50+.</span>
-      <span><b>pass ATS</b> no spread pick. Reasons include a big dog (TEAM +N), a small home dog that just allowed a pile of points, or a road favorite that lost its starter when the backup is not shown as the problem.</span>
+      <span><b>pass ATS</b> no spread pick. Reasons include a +10 dog, a +9 dog, a side that flipped before lock, a heavy dog with a losing ATS record, an early-season edge under 3, a small home dog that just allowed a pile of points, or a road favorite that lost its starter when the backup is not shown as the problem.</span>
       <span><b>moneyline only</b> straight-up pick instead of ATS when the number is too big.</span>
       <span><b>flag</b> the ATS pick stands, with a warning (fading a small home dog after a big points-allowed game).</span>
       <span><b>TEAM ML</b> moneyline side, not a spread number.</span>
@@ -2023,7 +2035,10 @@
   }
 
   function historyGameSortValue(row, key) {
-    if (key === 'gameDate') return row.gameDate || row.kickoff || '';
+    if (key === 'gameDate') {
+      const ms = Date.parse(row.kickoff);
+      return Number.isFinite(ms) ? ms : 0;
+    }
     if (key === 'opponent') return row.opponent || '';
     if (key === 'spread') return row.spread == null ? Number.NEGATIVE_INFINITY : Number(row.spread);
     if (key === 'restDays') return row.restDays == null ? Number.NEGATIVE_INFINITY : Number(row.restDays);
@@ -2121,7 +2136,7 @@
 
   function historyGamesTable(rows) {
     const cols = [
-      { key: 'gameDate', label: 'Game Date', title: 'Kickoff calendar date' },
+      { key: 'gameDate', label: 'Game Date', title: 'Kickoff in America/New_York as mm/dd/yyyy hh:mm EST (literal EST suffix)' },
       { key: 'opponent', label: 'Opponent', title: 'Opponent or AWAY @ HOME matchup' },
       { key: 'spread', label: 'Spread', title: 'Spread line (team-relative when a team is selected)' },
       { key: 'restDays', label: 'Rest Days', title: 'Days of rest' },
@@ -2279,7 +2294,7 @@
     const brierTitle = 'Brier score: mean squared error of predicted ATS win probability vs the actual 0/1 outcome (0 = perfect, 1 = worst). Lower is better.';
     return `<div class="hist-block">
       <h2>Expected call accuracy</h2>
-      <p class="bt-note">Same AI Pick sides as Current Week, written as <b>BUF -5.5 and Over</b>. ATS confidence is a calibrated historical ATS hit rate (2016+ scored REG). O/U confidence is a separate total edge/sample score, not a joint ATS+OU probability. ATS and OU are graded separately; joint requires both correct (a push on either side is a push).</p>
+      <p class="bt-note">Same AI Pick sides as Current Week, written as <b>BUF -5.5 and Over</b>. ATS confidence is a calibrated historical ATS hit rate (2016+ scored REG). O/U confidence is a separate isotonic reliability map of the total (same 2016+ fit, prior strength 12), not a joint ATS+OU probability. ATS and OU are graded separately; joint requires both correct (a push on either side is a push).</p>
       <p class="bt-note">Brier measures how close the confidence probability was to the real ATS result — think average squared miss. Raw uses the pre-calibration ATS confidence; calibrated uses the isotonic map. Closer to 0 is better.</p>
       <div class="bt-stats">
         <div class="bt-stat"><div class="k">Avg ATS confidence</div><div class="v">${exp.confidenceAvg != null ? `${esc(exp.confidenceAvg)}%` : '—'}</div></div>
@@ -2310,8 +2325,14 @@
     const { key, dir } = state.backtestSort;
     const copy = [...rows];
     copy.sort((a, b) => {
-      const av = a[key] == null ? '' : a[key];
-      const bv = b[key] == null ? '' : b[key];
+      let av = a[key] == null ? '' : a[key];
+      let bv = b[key] == null ? '' : b[key];
+      if (key === 'gameDate') {
+        av = Date.parse(a.kickoff);
+        bv = Date.parse(b.kickoff);
+        if (!Number.isFinite(av)) av = 0;
+        if (!Number.isFinite(bv)) bv = 0;
+      }
       let cmp = 0;
       if (typeof av === 'number' || typeof bv === 'number') cmp = Number(av) - Number(bv);
       else cmp = String(av).localeCompare(String(bv));
@@ -2391,7 +2412,7 @@
 
   function backtestGamesTable(rows) {
     const base = [
-      { key: 'gameDate', label: 'Date', title: 'Kickoff in America/New_York as YYYY-MM-DD HH:MM EST (literal EST suffix)' },
+      { key: 'gameDate', label: 'Date', title: 'Kickoff in America/New_York as mm/dd/yyyy hh:mm EST (literal EST suffix)' },
       { key: 'opponent', label: 'Matchup', title: 'Away and home team abbreviations (AWAY @ HOME)' },
       { key: 'spreadLabel', label: 'Spread', title: 'Closing spread for the focus team (or home-favored line)' },
       { key: 'total_line', label: 'Total', title: 'Closing total' },
@@ -2406,7 +2427,7 @@
       { key: 'ou', label: 'OU', title: 'Over/under result (O, U, or P)' },
       { key: 'expected', label: 'Expected', title: 'AI expected call (ATS or moneyline side, and Over/Under)' },
       { key: 'confidence', label: 'ATS %', title: 'ATS confidence: calibrated historical ATS hit rate (isotonic map from the ATS-only edge/sample rule)' },
-      { key: 'ouConfidence', label: 'O/U %', title: 'O/U confidence: separate edge/sample score for the total, not the ATS hit-rate map' },
+      { key: 'ouConfidence', label: 'O/U %', title: 'O/U confidence: calibrated historical O/U hit rate from an isotonic reliability map (2016+, prior strength 12), not the ATS hit-rate map' },
       { key: 'expectedAtsHit', label: 'ATS hit', title: 'Whether the expected ATS call hit (W, L, or P)' },
       { key: 'expectedOuHit', label: 'OU hit', title: 'Whether the expected over/under call hit (W, L, or P)' }
     ];
@@ -2663,12 +2684,13 @@
     return `<div class="perf-current">${bits.join('')}</div>`;
   }
 
-  function perfPickColumns() {
+  function perfPickColumns(criterion) {
+    if (criterion && Array.isArray(criterion.pickColumns) && criterion.pickColumns.length) return criterion.pickColumns;
     return [
       { key: 'week', label: 'Week', title: 'NFL week number for this pick' },
-      { key: 'team', label: 'Team', title: 'Team picked for this game: the side with the lower signed margin from its previous game' },
-      { key: 'margin', label: 'Previous margin', title: 'Signed margin of the picked team’s most recent final game earlier this season. Team points minus opponent points. A win is positive, a loss is negative, and a bye uses the last game played.' },
-      { key: 'spread', label: 'Spread', title: 'Picked team’s point spread for this game. Positive means points received. Absolute value must be from 4 through 9. Uses the frozen or stored line when present, otherwise the current line.' },
+      { key: 'team', label: 'Team', title: 'Team picked for this game' },
+      { key: 'margin', label: 'Previous margin', title: 'Figure from the picked team’s previous game' },
+      { key: 'spread', label: 'Spread', title: 'Picked team’s point spread for this game. Uses the frozen or stored line when present, otherwise the current line.' },
       { key: 'result', label: 'Result', title: 'ATS result for a final game: W is a cover, L is a miss, P is a push. Pending means the game is not final and is not graded.' }
     ];
   }
@@ -2726,7 +2748,7 @@
 
   function perfPickList(criterion) {
     if (!criterion.pickList) return '';
-    const cols = perfPickColumns();
+    const cols = perfPickColumns(criterion);
     const rows = sortPerfPicks(flattenPerfPicks(criterion.weeks));
     const body = rows.map((row) => {
       const marginTitle = row.detail || 'No previous-game margin';
@@ -2746,6 +2768,106 @@
         <table class="hist-table perf-table perf-pick-table">
           <thead><tr>${cols.map((col) => `<th data-perf-pick-sort="${esc(col.key)}" title="${esc(col.title)}" class="${state.performancePickSort.key === col.key ? 'sorted' : ''}">${esc(col.label)}${state.performancePickSort.key === col.key ? `<span class="caret">${state.performancePickSort.dir === 'asc' ? '▲' : '▼'}</span>` : ''}</th>`).join('')}</tr></thead>
           <tbody>${body || empty}</tbody>
+        </table>
+      </div>
+    </div>`;
+  }
+
+  function passMarketText(rule, markets, market, kind) {
+    if (!rule.markets || !rule.markets.includes(market)) return '—';
+    return perfMarketText(markets && markets[market], kind);
+  }
+
+  function flattenPassRows(rules) {
+    const rows = [];
+    for (const rule of rules || []) {
+      rows.push({
+        rule: rule.name,
+        ruleId: rule.id,
+        week: null,
+        weekLabel: 'YTD',
+        ytd: true,
+        markets: rule.year && rule.year.markets,
+        ruleMarkets: rule.markets
+      });
+      for (const week of rule.weeks || []) {
+        rows.push({
+          rule: rule.name,
+          ruleId: rule.id,
+          week: week.week,
+          weekLabel: String(week.week),
+          ytd: false,
+          markets: week.markets,
+          ruleMarkets: rule.markets
+        });
+      }
+    }
+    return rows;
+  }
+
+  function passSortValue(row, key) {
+    if (key === 'rule') return row.rule || '';
+    if (key === 'week') return row.ytd ? 1000 : Number(row.week);
+    if (key === 'atsRecord' || key === 'ouRecord') {
+      const market = row.markets && row.markets[key === 'atsRecord' ? 'ats' : 'ou'];
+      if (!market || market.label === '—' || market.pending || !market.graded) return null;
+      return market.wins - market.losses;
+    }
+    if (key === 'ats' || key === 'ou') {
+      const market = row.markets && row.markets[key];
+      if (!market || market.pending || market.winPct == null) return null;
+      return market.winPct;
+    }
+    return null;
+  }
+
+  function sortPassRows(rows) {
+    const { key, dir } = state.performancePassSort;
+    const mul = dir === 'asc' ? 1 : -1;
+    return [...(rows || [])].sort((a, b) => {
+      const av = passSortValue(a, key);
+      const bv = passSortValue(b, key);
+      if (av == null && bv == null) return String(a.rule).localeCompare(String(b.rule)) || (a.ytd === b.ytd ? (a.week || 0) - (b.week || 0) : (a.ytd ? -1 : 1));
+      if (av == null) return 1;
+      if (bv == null) return -1;
+      if (typeof av === 'string') {
+        const cmp = av.localeCompare(bv);
+        if (cmp) return cmp * mul;
+      } else if (av !== bv) return (av - bv) * mul;
+      return String(a.rule).localeCompare(String(b.rule)) || (Number(a.week) || 0) - (Number(b.week) || 0);
+    });
+  }
+
+  function perfPasses(report) {
+    const rules = (report.passes && report.passes.rules) || [];
+    const cols = [
+      { key: 'rule', label: 'Rule', title: 'Pass rule that kept this market off the published card. The record is the pick that would have been made.' },
+      { key: 'week', label: 'Week', title: 'NFL week for this would-have record. YTD is the season total of graded weeks.' },
+      { key: 'atsRecord', label: 'ATS', title: 'Would-have against-the-spread record (W-L, or W-L-P on a push). Pending means that week is not graded yet.' },
+      { key: 'ats', label: 'ATS win %', title: 'Would-have ATS win percentage. Wins divided by wins plus losses. Pushes are excluded.' },
+      { key: 'ouRecord', label: 'O/U', title: 'Would-have over/under record (W-L, or W-L-P on a push). Pending means that week is not graded yet.' },
+      { key: 'ou', label: 'O/U win %', title: 'Would-have over/under win percentage. Wins divided by wins plus losses. Pushes are excluded.' }
+    ];
+    const rows = sortPassRows(flattenPassRows(rules));
+    const body = rows.map((row) => {
+      const rule = { markets: row.ruleMarkets };
+      const cls = row.ytd ? ' class="perf-total"' : '';
+      return `<tr${cls}>
+        <td>${esc(row.rule)}</td>
+        <td>${esc(row.weekLabel)}</td>
+        <td>${esc(passMarketText(rule, row.markets, 'ats', 'record'))}</td>
+        <td>${esc(passMarketText(rule, row.markets, 'ats', 'pct'))}</td>
+        <td>${esc(passMarketText(rule, row.markets, 'ou', 'record'))}</td>
+        <td>${esc(passMarketText(rule, row.markets, 'ou', 'pct'))}</td>
+      </tr>`;
+    }).join('');
+    return `<div class="perf-passes">
+      <h2>Passes</h2>
+      <p class="lede">Markets the card passed. Each row grades the pick that would have been made. YTD adds only weeks that have a graded final.</p>
+      <div class="perf-table-wrap">
+        <table class="hist-table perf-table">
+          <thead><tr>${cols.map((col) => `<th data-perf-pass-sort="${esc(col.key)}" title="${esc(col.title)}" class="${state.performancePassSort.key === col.key ? 'sorted' : ''}">${esc(col.label)}${state.performancePassSort.key === col.key ? `<span class="caret">${state.performancePassSort.dir === 'asc' ? '▲' : '▼'}</span>` : ''}</th>`).join('')}</tr></thead>
+          <tbody>${body || '<tr><td colspan="6">No pass rules are registered.</td></tr>'}</tbody>
         </table>
       </div>
     </div>`;
@@ -2831,6 +2953,7 @@
         </table>
       </div>
       ${perfPickList(criterion)}
+      ${perfPasses(report)}
     </section>`;
   }
 
@@ -2960,6 +3083,14 @@
         const key = sort.dataset.sort;
         if (state.sort.key === key) state.sort.dir = state.sort.dir === 'asc' ? 'desc' : 'asc';
         else state.sort = { key, dir: key === 'username' ? 'asc' : 'desc' };
+        render();
+        return;
+      }
+      const perfPassSort = e.target.closest('th[data-perf-pass-sort]');
+      if (perfPassSort && state.page === 'performance') {
+        const key = perfPassSort.dataset.perfPassSort;
+        if (state.performancePassSort.key === key) state.performancePassSort.dir = state.performancePassSort.dir === 'asc' ? 'desc' : 'asc';
+        else state.performancePassSort = { key, dir: key === 'rule' || key === 'week' ? 'asc' : 'desc' };
         render();
         return;
       }

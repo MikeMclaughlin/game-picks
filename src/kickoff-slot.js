@@ -27,7 +27,7 @@ function etParts(iso) {
 
 /**
  * Kickoff as America/New_York wall time with a literal EST suffix
- * (even during daylight saving). Example: 2024-09-08 13:00 EST.
+ * (even during daylight saving). Example: 09/08/2024 13:00 EST.
  */
 function formatKickoffEst(iso) {
   const d = iso instanceof Date ? iso : new Date(iso);
@@ -51,7 +51,7 @@ function formatKickoffEst(iso) {
   if (!year || !month || !day) return '';
   const hour = String(get('hour') || '0').padStart(2, '0');
   const minute = String(get('minute') || '0').padStart(2, '0');
-  return `${year}-${month}-${day} ${hour}:${minute} EST`;
+  return `${month}/${day}/${year} ${hour}:${minute} EST`;
 }
 
 function weekdayCode(game, parts) {

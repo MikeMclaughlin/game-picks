@@ -108,7 +108,10 @@ test('locked games serve the stored snapshot and do not rewrite a frozen pick', 
     frozen_at: null,
     payload: stored
   }]);
-  assert.equal(pregameRow[0].aiPick.label, stored.label);
+  assert.equal(pregameRow[0].aiPick.atsTeam, null);
+  assert.equal(pregameRow[0].aiPick.atsNote, 'pass ATS — side flipped');
+  assert.equal(pregameRow[0].aiPick.wouldHaveAtsTeam, 'ARI');
+  assert.equal(pregameRow[0].aiPick.atsFlipped, true);
   assert.equal(pregameRow[0].aiPickFreezeNow, true);
   assert.equal(decidePersist(pregameRow[0]).freeze, true);
 
@@ -117,8 +120,16 @@ test('locked games serve the stored snapshot and do not rewrite a frozen pick', 
     frozen_at: null,
     payload: stored
   }]);
-  assert.equal(open[0].aiPick.ats, 'ARI +3.5');
+  assert.equal(open[0].aiPick.atsNote, 'pass ATS — side flipped');
+  assert.equal(open[0].aiPick.atsTeam, null);
   assert.equal(decidePersist(open[0]).freeze, false);
+
+  const sameSide = applyAiSnapshots([{ ...fresh, locked: false, aiPick: { ...fresh.aiPick, atsTeam: 'SEA', ats: 'SEA -3.5' } }], [{
+    game_id: fresh.game_id,
+    frozen_at: null,
+    payload: stored
+  }]);
+  assert.equal(sameSide[0].aiPick.atsTeam, 'SEA');
 
   const firstLock = applyAiSnapshots([{ ...fresh, locked: true }], []);
   assert.equal(firstLock[0].aiPick.ats, 'ARI +3.5');

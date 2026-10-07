@@ -205,7 +205,7 @@ test('enrichGame exposes lastGame, city, short rest, and xPts from the line', ()
     assert.equal(typeof card.aiPick.ouConfidence, 'number');
     assert.ok(card.aiPick.ouConfidence >= 51 && card.aiPick.ouConfidence <= 92);
   } else {
-    assert.match(String(card.aiPick.ouNote || ''), /pass under/);
+    assert.match(String(card.aiPick.ouNote || ''), /pass (under|O\/U)/);
   }
   assert.ok(card.aiPick.expected || card.aiPick.label);
   if (card.aiPick.ats && card.aiPick.ou) assert.match(card.aiPick.expected, / and /);
@@ -404,7 +404,7 @@ test('expected call label and confidence stay in documented bounds', () => {
     { hasHistory: true, projMargin: 10, projTotal: 52, sampleN: 80 }
   );
   assert.ok(high >= 51 && high <= 92);
-  const pick = aiPick({ home_team: 'BUF', away_team: 'MIA', spread_line: 5.5, total_line: 48 }, {
+  const pick = aiPick({ home_team: 'BUF', away_team: 'MIA', spread_line: 5.5, total_line: 47 }, {
     hasHistory: true,
     atsTeam: 'BUF',
     ou: 'over',
@@ -421,7 +421,7 @@ test('expected call label and confidence stay in documented bounds', () => {
   assert.ok(pick.rawConfidence >= 51 && pick.rawConfidence <= 92);
   assert.ok(pick.confidence >= 1 && pick.confidence <= 99);
   const sameSpread = { ...pick };
-  const louderTotal = aiPick({ home_team: 'BUF', away_team: 'MIA', spread_line: 5.5, total_line: 48 }, {
+  const louderTotal = aiPick({ home_team: 'BUF', away_team: 'MIA', spread_line: 5.5, total_line: 47 }, {
     hasHistory: true,
     atsTeam: 'BUF',
     ou: 'over',
@@ -744,19 +744,20 @@ test('TNF and 50+ totals veto high-confidence unders and discount mild ones', ()
     { hasHistory: true, atsTeam: 'BUF', ou: 'under', projMargin: 8, projTotal: 40, sampleN: 40 }
   );
   assert.equal(veto.ou, null);
-  assert.match(veto.ouNote, /TNF/);
-  assert.match(veto.ouNote, /50\+/);
+  assert.match(veto.ouNote, /pass under — TNF/);
   assert.equal(veto.ouConfidence, null);
   assert.equal(veto.atsTeam, 'BUF');
+  assert.ok((veto.passes || []).some((row) => row.rule === 'tnf-under'));
+  assert.ok((veto.passes || []).some((row) => row.rule === 'under-50'));
 
   const mild = aiPick(
     { home_team: 'GB', away_team: 'ATL', spread_line: 3, total_line: 46.5, weekday: 'Thursday' },
     { hasHistory: true, atsTeam: 'GB', ou: 'under', projMargin: 4, projTotal: 44.5, sampleN: 40 }
   );
-  assert.equal(mild.ou, 'under');
-  assert.ok(mild.ouConfidence <= 55);
-  assert.ok(mild.ouConfidence < mild.rawOuConfidence);
-  assert.match(mild.ouNote, /discounted/);
+  assert.equal(mild.ou, null);
+  assert.equal(mild.ouConfidence, null);
+  assert.match(mild.ouNote, /pass under — TNF/);
+  assert.equal((mild.passes || []).some((row) => row.rule === 'under-50'), false);
 
   const sundayHigh = aiPick(
     { home_team: 'DAL', away_team: 'BAL', spread_line: -3, total_line: 52.5, weekday: 'Sunday' },

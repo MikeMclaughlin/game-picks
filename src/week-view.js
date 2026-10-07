@@ -3,7 +3,7 @@
 const { roadTravel, teamAbbr, teamCity } = require('./teams');
 const { toNumber, scoresReady, isLocked, atsLetter, gradeAts, gradeOu, gradeWager } = require('./grader');
 const { kickoffSlot } = require('./kickoff-slot');
-const { displayConfidence, getActiveMap } = require('./calibration');
+const { displayConfidence, getActiveMap, getActiveOuMap } = require('./calibration');
 
 const SHORT_REST_DAYS = 5;
 
@@ -278,6 +278,9 @@ function restDays(game, side) {
 const RECENT_KEEP = 6;
 const LEAGUE_PPG = 22;
 const RATE_PRIOR_GAMES = 4;
+const EARLY_WEEK_MAX = 3;
+const EARLY_TOTAL_PRIOR_GAMES = 8;
+const EARLY_RECENT_MAX = 0.2;
 const HFA_MARGIN = 2.5;
 const SHORT_REST_PENALTY = 1.5;
 const BYE_BOOST = 0.75;
@@ -323,19 +326,28 @@ function travelPenalty(game) {
   return pen;
 }
 
-function blendRecent(career, values) {
+function isEarlyWeek(game) {
+  const week = Number(game && game.week);
+  const type = String((game && game.game_type) || 'REG').toUpperCase();
+  return type === 'REG' && week >= 1 && week <= EARLY_WEEK_MAX;
+}
+
+function blendRecent(career, values, maxWeight) {
+  const cap = maxWeight == null ? 0.6 : maxWeight;
   if (!values || values.length < 3) return career;
   const recent = values.reduce((sum, v) => sum + v, 0) / values.length;
-  const w = Math.min(0.6, 0.2 + values.length * 0.06);
+  const w = Math.min(cap, 0.2 + values.length * 0.06);
   return career * (1 - w) + recent * w;
 }
 
-function offenseDefense(profile, site) {
-  const careerOff = shrunkMean(profile.for, profile.n, LEAGUE_PPG, RATE_PRIOR_GAMES);
-  const careerDef = shrunkMean(profile.against, profile.n, LEAGUE_PPG, RATE_PRIOR_GAMES);
+function offenseDefense(profile, site, opts) {
+  const priorN = opts && opts.priorGames != null ? opts.priorGames : RATE_PRIOR_GAMES;
+  const maxRecent = opts && opts.maxRecent != null ? opts.maxRecent : 0.6;
+  const careerOff = shrunkMean(profile.for, profile.n, LEAGUE_PPG, priorN);
+  const careerDef = shrunkMean(profile.against, profile.n, LEAGUE_PPG, priorN);
   const recent = profile.recent || [];
-  let off = blendRecent(careerOff, recent.map((g) => g.scored));
-  let def = blendRecent(careerDef, recent.map((g) => g.allowed));
+  let off = blendRecent(careerOff, recent.map((g) => g.scored), maxRecent);
+  let def = blendRecent(careerDef, recent.map((g) => g.allowed), maxRecent);
   const siteN = site === 'home' ? Number(profile.homeN) || 0 : Number(profile.awayN) || 0;
   const siteFor = site === 'home' ? Number(profile.homeFor) || 0 : Number(profile.awayFor) || 0;
   const siteAg = site === 'home' ? Number(profile.homeAgainst) || 0 : Number(profile.awayAgainst) || 0;
@@ -354,20 +366,34 @@ function offenseDefense(profile, site) {
  * rest, bye weeks, and 2+ zone road trips adjust the matchup after that.
  * Only games before kickoff count (missing kickoff uses the whole history).
  */
+function applyMatchupContext(game, projHome, projAway, siteReady) {
+  let homePts = projHome;
+  let awayPts = projAway;
+  if (!siteReady) {
+    homePts += HFA_MARGIN / 2;
+    awayPts -= HFA_MARGIN / 2;
+  }
+  homePts += restPoints(game.home_rest);
+  awayPts += restPoints(game.away_rest);
+  awayPts -= travelPenalty(game);
+  return { projHome: homePts, projAway: awayPts };
+}
+
 function projectFromProfiles(game, home, away) {
   const h = offenseDefense(home, 'home');
   const a = offenseDefense(away, 'away');
-  let projHome = (h.off + a.def) / 2;
-  let projAway = (a.off + h.def) / 2;
   const siteReady = h.siteN >= SITE_MIN && a.siteN >= SITE_MIN;
-  if (!siteReady) {
-    projHome += HFA_MARGIN / 2;
-    projAway -= HFA_MARGIN / 2;
+  const sided = applyMatchupContext(game, (h.off + a.def) / 2, (a.off + h.def) / 2, siteReady);
+  const projHome = sided.projHome;
+  const projAway = sided.projAway;
+  let projTotal = projHome + projAway;
+  if (isEarlyWeek(game)) {
+    const he = offenseDefense(home, 'home', { priorGames: EARLY_TOTAL_PRIOR_GAMES, maxRecent: EARLY_RECENT_MAX });
+    const ae = offenseDefense(away, 'away', { priorGames: EARLY_TOTAL_PRIOR_GAMES, maxRecent: EARLY_RECENT_MAX });
+    const earlySite = he.siteN >= SITE_MIN && ae.siteN >= SITE_MIN;
+    const early = applyMatchupContext(game, (he.off + ae.def) / 2, (ae.off + he.def) / 2, earlySite);
+    projTotal = early.projHome + early.projAway;
   }
-  projHome += restPoints(game.home_rest);
-  projAway += restPoints(game.away_rest);
-  projAway -= travelPenalty(game);
-  const projTotal = projHome + projAway;
   const projMargin = projHome - projAway;
   const total = toNumber(game.total_line);
   const spread = toNumber(game.spread_line);
@@ -493,6 +519,13 @@ function expectedCallLabel(ats, ou, ml) {
 }
 
 const HUGE_DOG_SPREAD = 10;
+const PLUS9_MIN = 9;
+const PLUS9_MAX = 9.5;
+const HEAVY_DOG_SPREAD = 7;
+const EARLY_EDGE = 3;
+const OU_SMALL_EDGE = 2;
+const OVER_PASS_TOTAL = 48;
+const OVER_KEEP_EDGE = 5;
 const BLOWN_DEFENSE_POINTS = 50;
 const SMALL_HOME_DOG_MAX = 3;
 const HOME_DOG_FADE_MIN_EDGE = 6;
@@ -532,7 +565,8 @@ function aiConfidence(game, projection) {
 
 /**
  * Raw O/U score 51–92 from the total edge and sample size only.
- * Not passed through the ATS hit-rate map. No-history fade of totals ≥46 is 54.
+ * Display maps this through the O/U isotonic reliability map, not the ATS map.
+ * No-history fade of totals ≥46 is 54.
  */
 function ouConfidenceRaw(game, projection) {
   if (!projection || !projection.hasHistory) {
@@ -552,6 +586,64 @@ function teamSpread(team, game) {
   const spread = toNumber(game.spread_line);
   if (spread == null || !team) return null;
   return team === game.home_team ? -spread : spread;
+}
+
+function atsEdgePoints(projection, game) {
+  const spread = toNumber(game.spread_line);
+  if (spread == null || !projection || projection.projMargin == null) return null;
+  return Math.abs(projection.projMargin - spread);
+}
+
+function ouEdgePoints(projection, game) {
+  const total = toNumber(game.total_line);
+  if (total == null || !projection || projection.projTotal == null) return null;
+  return Math.abs(projection.projTotal - total);
+}
+
+function weekNumber(game) {
+  const week = Number(game && game.week);
+  return Number.isFinite(week) ? week : null;
+}
+
+function isWeekFourPlus(game) {
+  const week = weekNumber(game);
+  if (week == null || week < 4) return false;
+  const type = String((game && game.game_type) || 'REG').toUpperCase();
+  return type !== 'PRE';
+}
+
+function logPass(passes, entry) {
+  if (Array.isArray(passes)) passes.push(entry);
+}
+
+function atsRecordLosing(seasonAts, team) {
+  if (!seasonAts || !team || !Object.prototype.hasOwnProperty.call(seasonAts, team)) return false;
+  const rec = seasonAts[team] || {};
+  const covers = Number(rec.covers) || 0;
+  const fails = Number(rec.fails) || 0;
+  return fails > covers;
+}
+
+function seasonAtsTable(history, game) {
+  const season = Number(game && game.season);
+  const before = Date.parse(game && game.kickoff);
+  const table = {};
+  for (const team of [game.home_team, game.away_team]) {
+    if (team) table[team] = { covers: 0, fails: 0 };
+  }
+  for (const prior of history || []) {
+    if (Number(prior.season) !== season) continue;
+    if (String(prior.game_type || 'REG').toUpperCase() === 'PRE') continue;
+    const kick = Date.parse(prior.kickoff);
+    if (Number.isFinite(before) && Number.isFinite(kick) && kick >= before) continue;
+    for (const team of [prior.home_team, prior.away_team]) {
+      if (!table[team]) continue;
+      const letter = atsLetter(prior, team);
+      if (letter === 'C') table[team].covers += 1;
+      else if (letter === 'F') table[team].fails += 1;
+    }
+  }
+  return table;
 }
 
 function projectionEdge(projection, game, team) {
@@ -599,7 +691,9 @@ function backupIsProblem(snapshot, backupName, starterName) {
  * favorite that changed quarterbacks is not faded unless the backup's own
  * starts show a real scoring drop.
  */
-function guardSides(game, projection, atsTeam) {
+function guardSides(game, projection, atsTeam, options = {}) {
+  const passes = options.passes;
+  const seasonAts = options.seasonAts;
   let team = atsTeam || null;
   let mlTeam = null;
   let atsNote = null;
@@ -616,6 +710,19 @@ function guardSides(game, projection, atsTeam) {
       atsMarket = 'pass';
       atsNote = `pass ATS — ${team} +${shown}`;
     }
+    logPass(passes, { rule: 'plus-10-dog', market: 'ats', selection: team, note: atsNote });
+    team = null;
+  }
+  if (team && line != null && roundedTenths(line) >= PLUS9_MIN && roundedTenths(line) <= PLUS9_MAX) {
+    atsMarket = 'pass';
+    atsNote = 'pass ATS — +9 dog';
+    logPass(passes, { rule: 'plus-9-dog', market: 'ats', selection: team, note: atsNote });
+    team = null;
+  }
+  if (team && line != null && line >= HEAVY_DOG_SPREAD && atsRecordLosing(seasonAts, team)) {
+    atsMarket = 'pass';
+    atsNote = 'pass ATS — heavy dog, losing ATS record';
+    logPass(passes, { rule: 'heavy-dog-losing', market: 'ats', selection: team, note: atsNote });
     team = null;
   }
   if (team && team !== game.home_team) {
@@ -648,26 +755,42 @@ function guardSides(game, projection, atsTeam) {
   return { atsTeam: team, mlTeam, atsNote, atsMarket };
 }
 
-function guardTotal(game, projection, ouRaw) {
+function guardTotal(game, projection, ouRaw, ouDisplay, passes) {
   let ou = projection && projection.ou ? projection.ou : null;
   let ouNote = null;
-  let shown = ou ? ouRaw : null;
+  const display = ouDisplay == null ? ouRaw : ouDisplay;
+  let shown = ou ? display : null;
   const total = toNumber(game.total_line);
+  const edge = ouEdgePoints(projection, game);
   const tnf = isThursdayNight(game);
   const high = total != null && total >= HIGH_TOTAL;
-  if (ou === 'under' && (tnf || high)) {
-    const why = [];
-    if (tnf) why.push('TNF');
-    if (high) why.push('total 50+');
-    const reason = why.join(' and ');
-    if (!projection.hasHistory || ouRaw >= UNDER_VETO_RAW) {
-      ou = null;
-      shown = null;
-      ouNote = `pass under — ${reason}`;
-    } else {
-      shown = Math.max(51, Math.min(UNDER_CONF_CAP, ouRaw - UNDER_DISCOUNT));
-      ouNote = `under discounted — ${reason}`;
-    }
+  const reasons = [];
+  if (ou && isEarlyWeek(game) && (edge == null || edge < EARLY_EDGE)) {
+    reasons.push({ rule: 'early-season', market: 'ou', selection: ou, note: 'pass O/U — early season' });
+  }
+  if (ou && isWeekFourPlus(game) && edge != null && edge < OU_SMALL_EDGE) {
+    reasons.push({ rule: 'small-edge-ou', market: 'ou', selection: ou, note: 'pass O/U — small edge' });
+  }
+  if (ou === 'over' && total != null && total >= OVER_PASS_TOTAL && (edge == null || edge < OVER_KEEP_EDGE)) {
+    reasons.push({ rule: 'over-48', market: 'ou', selection: 'over', note: 'pass over — total 48+' });
+  }
+  if (ou === 'under' && tnf) {
+    reasons.push({ rule: 'tnf-under', market: 'ou', selection: 'under', note: 'pass under — TNF' });
+  }
+  const under50Hard = ou === 'under' && high && (!projection.hasHistory || ouRaw >= UNDER_VETO_RAW);
+  if (under50Hard) {
+    reasons.push({ rule: 'under-50', market: 'ou', selection: 'under', note: 'pass under — total 50+' });
+  }
+  if (reasons.length) {
+    const preferred = ['tnf-under', 'early-season', 'over-48', 'under-50', 'small-edge-ou'];
+    const lead = preferred.map((id) => reasons.find((row) => row.rule === id)).find(Boolean) || reasons[0];
+    ouNote = lead.note;
+    for (const row of reasons) logPass(passes, row);
+    return { ou: null, ouNote, ouShown: null, ouRaw: null };
+  }
+  if (ou === 'under' && high) {
+    shown = Math.max(51, Math.min(UNDER_CONF_CAP, display - UNDER_DISCOUNT));
+    ouNote = 'under discounted — total 50+';
   }
   return { ou, ouNote, ouShown: shown, ouRaw: ou ? ouRaw : null };
 }
@@ -903,18 +1026,50 @@ function annotateCard(card) {
 function aiPick(game, projection, options = {}) {
   const proj = projection || {};
   const total = formatLine(game.total_line);
+  const passes = [];
   let sideTeam = proj.atsTeam || null;
   if (!sideTeam && !proj.hasHistory && toNumber(game.spread_line) != null) {
     const spread = toNumber(game.spread_line);
     sideTeam = spread > 0 ? game.away_team : game.home_team;
   }
-  const sides = guardSides(game, proj, sideTeam);
+  let earlyAts = false;
+  if (isEarlyWeek(game) && sideTeam) {
+    const edge = atsEdgePoints(proj, game);
+    if (edge == null || edge < EARLY_EDGE) {
+      earlyAts = true;
+      logPass(passes, {
+        rule: 'early-season',
+        market: 'ats',
+        selection: sideTeam,
+        note: 'pass ATS — early season'
+      });
+    }
+  }
+  let sides = guardSides(game, proj, sideTeam, { passes, seasonAts: options.seasonAts });
+  if (earlyAts && sides.atsTeam) {
+    sides = {
+      atsTeam: null,
+      mlTeam: null,
+      atsNote: 'pass ATS — early season',
+      atsMarket: 'pass'
+    };
+  }
   const rawAts = sides.atsTeam ? aiConfidence(game, proj) : null;
   const rawOuBase = proj.ou ? ouConfidenceRaw(game, proj) : null;
-  const totalGuard = guardTotal(game, proj, rawOuBase == null ? 52 : rawOuBase);
   const map = options.map === undefined
     ? (options.calibrate === false ? null : getActiveMap())
     : options.map;
+  const ouMap = options.ouMap === undefined
+    ? (options.calibrate === false ? null : getActiveOuMap())
+    : options.ouMap;
+  const ouDisplay = rawOuBase == null ? null : displayConfidence(rawOuBase, ouMap);
+  const totalGuard = guardTotal(
+    game,
+    proj,
+    rawOuBase == null ? 52 : rawOuBase,
+    ouDisplay == null ? (rawOuBase == null ? 52 : rawOuBase) : ouDisplay,
+    passes
+  );
   const ats = sides.atsTeam ? formatAtsPick(sides.atsTeam, game) : null;
   const ml = sides.mlTeam ? `${sides.mlTeam} ML` : null;
   const atsConfidence = rawAts == null ? null : displayConfidence(rawAts, map);
@@ -942,7 +1097,8 @@ function aiPick(game, projection, options = {}) {
     rawConfidence: rawAts,
     rawAtsConfidence: rawAts,
     rawOuConfidence: totalGuard.ou ? rawOuBase : null,
-    atsTeam: sides.atsTeam
+    atsTeam: sides.atsTeam,
+    passes
   };
 }
 
@@ -996,7 +1152,7 @@ function sideContext(game, side, history) {
 
 function enrichGame(game, history, wagersByGame = {}) {
   const projection = projectGame(game, history);
-  const pick = aiPick(game, projection);
+  const pick = aiPick(game, projection, { seasonAts: seasonAtsTable(history, game) });
   const implied = impliedPoints(game.spread_line, game.total_line);
   const locked = isLocked(game);
   const userWagers = wagersByGame[game.game_id] || [];
@@ -1084,6 +1240,8 @@ module.exports = {
   expectedCallLabel,
   guardSides,
   guardTotal,
+  seasonAtsTable,
+  isEarlyWeek,
   enrichGame,
   currentSeasonWeek,
   pctLabel,

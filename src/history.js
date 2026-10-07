@@ -3,7 +3,7 @@
 const { roadTravel, distanceBucket, sameDivision, tzIndex } = require('./teams');
 const { toNumber, scoresReady, atsLetter } = require('./grader');
 const { resultLetter, formatLine } = require('./week-view');
-const { timeOfDayBucket } = require('./kickoff-slot');
+const { timeOfDayBucket, formatKickoffEst } = require('./kickoff-slot');
 
 const DEFAULT_FROM = 2016;
 const DEFAULT_TO = 2026;
@@ -37,7 +37,7 @@ const NOTES = {
   role: 'Favorite/underdog from spread_line (positive means home favored). Pick’em and missing lines are excluded.',
   division: 'Static current NFL division map on team abbreviations (not a schedule feed field).',
   daysOff: 'Uses home_rest/away_rest: short ≤5 days, bye+ ≥11, else normal.',
-  gameDate: 'Kickoff calendar date (gameday, else kickoff in ET).',
+  gameDate: 'Kickoff in America/New_York as mm/dd/yyyy hh:mm EST (literal EST suffix).',
   opponent: 'Team-relative opponent when a team is selected; otherwise the AWAY @ HOME matchup.',
   spread: 'Team-relative signed spread when a team is selected; otherwise home-favored line. Filter buckets from |spread_line|: pick = 0, small ≤3, medium ≤6.5, large 7+.',
   restDays: 'Team rest when a team is selected; otherwise away / home rest.',
@@ -156,21 +156,7 @@ function weatherLabel(game) {
 }
 
 function gameDateValue(game) {
-  if (game.gameday) return String(game.gameday);
-  const iso = game.kickoff;
-  const d = iso instanceof Date ? iso : new Date(iso);
-  if (!Number.isFinite(d.getTime())) return '';
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'America/New_York',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit'
-  }).formatToParts(d);
-  const get = (type) => {
-    const row = parts.find((p) => p.type === type);
-    return row ? row.value : '';
-  };
-  return [get('year'), get('month'), get('day')].filter(Boolean).join('-');
+  return formatKickoffEst(game && game.kickoff) || '';
 }
 
 function signedSpreadForTeam(game, team) {
@@ -294,7 +280,7 @@ function gameLogRows(games, filters) {
       rows.push(gameLogRow(g, null));
     }
   }
-  rows.sort((a, b) => String(b.gameDate).localeCompare(String(a.gameDate)) || String(a.game_id).localeCompare(String(b.game_id)));
+  rows.sort((a, b) => (Date.parse(b.kickoff) || 0) - (Date.parse(a.kickoff) || 0) || String(a.game_id).localeCompare(String(b.game_id)));
   return rows;
 }
 

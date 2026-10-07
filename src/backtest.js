@@ -726,7 +726,7 @@ function backtestPayload(games, options = {}) {
   const expected = expectedSummary(matched);
   const rows = matched
     .map((o) => enrichObservation(o, index, injuryIndex))
-    .sort((a, b) => String(b.gameDate).localeCompare(String(a.gameDate)) || String(a.game_id).localeCompare(String(b.game_id)));
+    .sort((a, b) => (Date.parse(b.kickoff) || 0) - (Date.parse(a.kickoff) || 0) || String(a.game_id).localeCompare(String(b.game_id)));
   const seasons = [...new Set(scored.map((g) => Number(g.season)).filter(Number.isFinite))].sort((a, b) => a - b);
   return {
     ok: true,
