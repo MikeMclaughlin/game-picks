@@ -30,8 +30,8 @@ test('ISO-only kickoffs still classify in America/New_York', () => {
 });
 
 test('formatKickoffEst uses New York wall time with a literal EST suffix', () => {
-  assert.equal(formatKickoffEst('2024-09-08T17:00:00Z'), '2024-09-08 13:00 EST');
-  assert.equal(formatKickoffEst('2024-12-08T18:00:00Z'), '2024-12-08 13:00 EST');
+  assert.equal(formatKickoffEst('2024-09-08T17:00:00Z'), '09/08/2024 13:00 EST');
+  assert.equal(formatKickoffEst('2024-12-08T18:00:00Z'), '12/08/2024 13:00 EST');
   assert.equal(formatKickoffEst('not-a-date'), '');
 });
 

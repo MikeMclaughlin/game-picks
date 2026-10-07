@@ -427,7 +427,7 @@ test('/api/backtest aggregates history with lift, expected calls, and CSV', asyn
     assert.equal(Object.prototype.hasOwnProperty.call(g, 'expected'), true);
     assert.equal(Object.prototype.hasOwnProperty.call(g, 'confidence'), true);
     if (g.expected) assert.match(String(g.expected), / and /);
-    if (g.gameDate) assert.match(String(g.gameDate), /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} EST$/);
+    if (g.gameDate) assert.match(String(g.gameDate), /^\d{2}\/\d{2}\/\d{4} \d{2}:\d{2} EST$/);
     if (g.away_team && g.home_team) {
       assert.equal(g.matchup, `${g.away_team} @ ${g.home_team}`);
       assert.equal(g.opponent, `${g.away_team} @ ${g.home_team}`);

@@ -109,7 +109,7 @@ test('in-sample Brier of the isotonic map is not worse than the raw score', () =
 
 test('calibration does not change ATS/OU side selection', () => {
   resetCalibration();
-  const game = { home_team: 'BUF', away_team: 'MIA', spread_line: 5.5, total_line: 48 };
+  const game = { home_team: 'BUF', away_team: 'MIA', spread_line: 5.5, total_line: 47 };
   const projection = {
     hasHistory: true,
     atsTeam: 'BUF',

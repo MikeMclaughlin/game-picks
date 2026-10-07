@@ -17,7 +17,7 @@
  * the side.
  */
 
-const { scoresReady, atsLetter } = require('./grader');
+const { scoresReady, atsLetter, gradeOu } = require('./grader');
 const { HISTORY_FROM_SEASON } = require('./seasons');
 
 const CALIBRATION_TARGET = 'ats';
@@ -25,9 +25,10 @@ const PRIOR_STRENGTH = 12;
 const DISPLAY_MIN = 1;
 const DISPLAY_MAX = 99;
 
-const CALIBRATION_NOTE = 'ATS confidence is a calibrated historical ATS hit rate (2016+ scored regular-season games). The raw ATS edge/sample rule — with no over/under edge mixed in — is mapped with isotonic (monotone) reliability so this % tracks ATS hit rate by raw-score bucket. O/U confidence is a separate edge/sample score for the total and is not that ATS hit rate.';
+const CALIBRATION_NOTE = 'ATS confidence is a calibrated historical ATS hit rate (2016+ scored regular-season games). The raw ATS edge/sample rule — with no over/under edge mixed in — is mapped with isotonic (monotone) reliability so this % tracks ATS hit rate by raw-score bucket. O/U confidence is a separate isotonic reliability map of the raw total edge/sample score (same 2016+ fit, prior strength 12), not the ATS hit rate and not a joint ATS+O/U probability.';
 
 let activeMap = null;
+let activeOuMap = null;
 
 function clamp(n, lo, hi) {
   return Math.min(hi, Math.max(lo, n));
@@ -95,7 +96,7 @@ function shrunkRate(hits, n, prior) {
   return (hh + PRIOR_STRENGTH * p) / (nn + PRIOR_STRENGTH);
 }
 
-function fitReliabilityMap(samples) {
+function fitReliabilityMap(samples, target = CALIBRATION_TARGET) {
   const buckets = new Map();
   for (const sample of samples || []) {
     const raw = Math.round(Number(sample.raw));
@@ -110,7 +111,7 @@ function fitReliabilityMap(samples) {
   const sorted = [...buckets.values()].sort((a, b) => a.raw - b.raw);
   if (!sorted.length) {
     return {
-      target: CALIBRATION_TARGET,
+      target,
       knots: [],
       decided: 0,
       buckets: 0
@@ -132,7 +133,7 @@ function fitReliabilityMap(samples) {
   let decided = 0;
   for (const b of sorted) decided += b.n;
   return {
-    target: CALIBRATION_TARGET,
+    target,
     knots,
     decided,
     buckets: knots.length
@@ -179,8 +180,18 @@ function setActiveMap(map) {
   return activeMap;
 }
 
+function getActiveOuMap() {
+  return activeOuMap;
+}
+
+function setActiveOuMap(map) {
+  activeOuMap = map || null;
+  return activeOuMap;
+}
+
 function resetCalibration() {
   activeMap = null;
+  activeOuMap = null;
 }
 
 function bumpScoringRates(rates, game) {
@@ -188,30 +199,72 @@ function bumpScoringRates(rates, game) {
   applyGameToRates(rates, game);
 }
 
-function collectAtsSamples(games) {
+function emptyAtsRec() {
+  return { covers: 0, fails: 0 };
+}
+
+function bumpAtsRec(rec, letter) {
+  if (!rec) return;
+  if (letter === 'C') rec.covers += 1;
+  else if (letter === 'F') rec.fails += 1;
+}
+
+/**
+ * One walk: project each scored game from prior rates only, then grade the
+ * published ATS and O/U sides. Season ATS records are the cover/fail counts
+ * before kickoff so the heavy-dog gate matches the live card.
+ */
+function collectCalibrationSamples(games) {
   const { aiPick, projectGameFromRates } = require('./week-view');
   const sorted = [...(games || [])]
     .filter((g) => scoresReady(g) && g.game_type !== 'PRE' && Number(g.season) >= HISTORY_FROM_SEASON)
     .sort((a, b) => Date.parse(a.kickoff) - Date.parse(b.kickoff) || String(a.game_id).localeCompare(String(b.game_id)));
   const rates = new Map();
-  const samples = [];
+  const records = new Map();
+  const atsSamples = [];
+  const ouSamples = [];
   for (const game of sorted) {
+    const seasonAts = {};
+    for (const team of [game.home_team, game.away_team]) {
+      seasonAts[team] = records.get(`${game.season}|${team}`) || emptyAtsRec();
+    }
     const projection = projectGameFromRates(game, rates.get(game.home_team), rates.get(game.away_team));
-    const pick = aiPick(game, projection, { calibrate: false });
+    const pick = aiPick(game, projection, { calibrate: false, seasonAts });
     if (pick.atsTeam && pick.rawConfidence != null) {
       const letter = atsLetter(game, pick.atsTeam);
-      if (letter === 'C') samples.push({ raw: pick.rawConfidence, hit: 1, game_id: game.game_id });
-      else if (letter === 'F') samples.push({ raw: pick.rawConfidence, hit: 0, game_id: game.game_id });
+      if (letter === 'C') atsSamples.push({ raw: pick.rawConfidence, hit: 1, game_id: game.game_id });
+      else if (letter === 'F') atsSamples.push({ raw: pick.rawConfidence, hit: 0, game_id: game.game_id });
+    }
+    if (pick.ou && pick.rawOuConfidence != null) {
+      const graded = gradeOu(game, pick.ou);
+      if (graded && graded.result === 'win') ouSamples.push({ raw: pick.rawOuConfidence, hit: 1, game_id: game.game_id });
+      else if (graded && graded.result === 'loss') ouSamples.push({ raw: pick.rawOuConfidence, hit: 0, game_id: game.game_id });
     }
     bumpScoringRates(rates, game);
+    for (const team of [game.home_team, game.away_team]) {
+      const key = `${game.season}|${team}`;
+      const rec = records.get(key) || emptyAtsRec();
+      bumpAtsRec(rec, atsLetter(game, team));
+      records.set(key, rec);
+    }
   }
-  return samples;
+  return { atsSamples, ouSamples };
+}
+
+function collectAtsSamples(games) {
+  return collectCalibrationSamples(games).atsSamples;
+}
+
+function collectOuSamples(games) {
+  return collectCalibrationSamples(games).ouSamples;
 }
 
 function fitCalibrationFromGames(games) {
-  const samples = collectAtsSamples(games);
-  const map = fitReliabilityMap(samples);
+  const { atsSamples, ouSamples } = collectCalibrationSamples(games);
+  const map = fitReliabilityMap(atsSamples, 'ats');
+  const ouMap = fitReliabilityMap(ouSamples, 'ou');
   setActiveMap(map);
+  setActiveOuMap(ouMap);
   return map;
 }
 
@@ -258,9 +311,13 @@ module.exports = {
   displayConfidence,
   getActiveMap,
   setActiveMap,
+  getActiveOuMap,
+  setActiveOuMap,
   resetCalibration,
   bumpScoringRates,
   collectAtsSamples,
+  collectOuSamples,
+  collectCalibrationSamples,
   fitCalibrationFromGames,
   sliceBrierStats
 };

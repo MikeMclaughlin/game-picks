@@ -166,7 +166,7 @@ test('history game log includes date, opponent, spread, rest, weather, distance,
   ];
   const sea = gameLogRows(games, parseHistoryFilters({ team: 'SEA', from: 2024, to: 2024 }));
   assert.equal(sea.length, 1);
-  assert.equal(sea[0].gameDate, '2024-09-15');
+  assert.equal(sea[0].gameDate, '09/15/2024 13:00 EST');
   assert.equal(sea[0].opponent, '@ BUF');
   assert.equal(sea[0].spreadLabel, '+6');
   assert.equal(sea[0].restDays, 7);

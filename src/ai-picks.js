@@ -1,5 +1,7 @@
 'use strict';
 
+const { expectedCallLabel } = require('./week-view');
+
 function numOrNull(value) {
   if (value == null || value === '') return null;
   const n = Number(value);
@@ -31,6 +33,14 @@ function pickPayload(card) {
     rawAtsConfidence: rawConfidence,
     rawOuConfidence,
     atsTeam: ai.atsTeam || null,
+    atsFlipped: Boolean(ai.atsFlipped),
+    wouldHaveAtsTeam: ai.wouldHaveAtsTeam || null,
+    passes: Array.isArray(ai.passes) ? ai.passes.map((row) => ({
+      rule: row && row.rule ? String(row.rule) : '',
+      market: row && row.market ? String(row.market) : '',
+      selection: row && row.selection ? String(row.selection) : '',
+      note: row && row.note ? String(row.note) : ''
+    })).filter((row) => row.rule) : [],
     home_team: card.home_team,
     away_team: card.away_team,
     spread_line: card.spread_line == null ? null : Number(card.spread_line),
@@ -74,8 +84,54 @@ function pickFromPayload(payload) {
     rawConfidence,
     rawAtsConfidence: rawConfidence,
     rawOuConfidence: numOrNull(p.rawOuConfidence),
-    atsTeam: p.atsTeam || null
+    atsTeam: p.atsTeam || null,
+    atsFlipped: Boolean(p.atsFlipped),
+    wouldHaveAtsTeam: p.wouldHaveAtsTeam || null,
+    passes: Array.isArray(p.passes) ? p.passes : []
   };
+}
+
+function sideFlipPass(fresh, wouldTeam) {
+  const pick = fresh && typeof fresh === 'object' ? fresh : {};
+  const passes = Array.isArray(pick.passes) ? pick.passes.slice() : [];
+  const note = 'pass ATS — side flipped';
+  if (wouldTeam && !passes.some((row) => row && row.rule === 'side-flip')) {
+    passes.push({ rule: 'side-flip', market: 'ats', selection: wouldTeam, note });
+  }
+  const ouText = pick.ouText || pick.ouNote || null;
+  return {
+    ...pick,
+    ats: null,
+    atsTeam: null,
+    ml: null,
+    mlTeam: null,
+    atsMarket: 'pass',
+    atsNote: note,
+    confidence: null,
+    atsConfidence: null,
+    rawConfidence: null,
+    rawAtsConfidence: null,
+    label: [note, ouText].filter(Boolean).join(' · ') || note,
+    expected: expectedCallLabel(null, pick.ou, null),
+    atsFlipped: true,
+    wouldHaveAtsTeam: wouldTeam || pick.wouldHaveAtsTeam || null,
+    passes
+  };
+}
+
+function shouldSideFlip(stored, card) {
+  if (!stored) return false;
+  if (stored.atsFlipped) return true;
+  const next = card && card.aiPick && card.aiPick.atsTeam;
+  return Boolean(stored.atsTeam && next && stored.atsTeam !== next);
+}
+
+function wouldHaveSide(stored, card) {
+  const next = card && card.aiPick && card.aiPick.atsTeam;
+  if (next) return next;
+  if (stored && stored.wouldHaveAtsTeam) return stored.wouldHaveAtsTeam;
+  if (stored && stored.atsTeam) return stored.atsTeam;
+  return null;
 }
 
 /**
@@ -91,8 +147,24 @@ function applyAiSnapshots(cards, rows) {
     if (!card || !card.game_id) return card;
     const row = byId.get(card.game_id);
     const stored = row ? pickFromPayload(row.payload) : null;
-    if (row && row.frozen_at && stored) {
-      return { ...card, aiPick: stored, aiPickFrozen: true };
+    if (row && row.frozen_at) {
+      if (stored) return { ...card, aiPick: stored, aiPickFrozen: true };
+      return {
+        ...card,
+        aiPickFrozen: true,
+        aiPick: {
+          label: null,
+          atsMarket: 'pass',
+          atsNote: 'frozen pick unavailable',
+          ou: null,
+          atsTeam: null
+        }
+      };
+    }
+    if (stored && shouldSideFlip(stored, card)) {
+      const flipped = sideFlipPass(card.aiPick, wouldHaveSide(stored, card));
+      if (card.locked) return { ...card, aiPick: flipped, aiPickFreezeNow: true };
+      return { ...card, aiPick: flipped };
     }
     if (card.locked && stored) {
       return { ...card, aiPick: stored, aiPickFreezeNow: true };
@@ -130,18 +202,19 @@ async function persistAiPicks(sql, cards) {
         ${frozenAt}::timestamptz
       )
       ON CONFLICT (game_id) DO UPDATE SET
-        season = EXCLUDED.season,
-        week = EXCLUDED.week,
-        home_team = EXCLUDED.home_team,
-        away_team = EXCLUDED.away_team,
-        spread_line = EXCLUDED.spread_line,
-        total_line = EXCLUDED.total_line,
-        payload = EXCLUDED.payload,
+        season = CASE WHEN ai_picks.frozen_at IS NULL THEN EXCLUDED.season ELSE ai_picks.season END,
+        week = CASE WHEN ai_picks.frozen_at IS NULL THEN EXCLUDED.week ELSE ai_picks.week END,
+        home_team = CASE WHEN ai_picks.frozen_at IS NULL THEN EXCLUDED.home_team ELSE ai_picks.home_team END,
+        away_team = CASE WHEN ai_picks.frozen_at IS NULL THEN EXCLUDED.away_team ELSE ai_picks.away_team END,
+        spread_line = CASE WHEN ai_picks.frozen_at IS NULL THEN EXCLUDED.spread_line ELSE ai_picks.spread_line END,
+        total_line = CASE WHEN ai_picks.frozen_at IS NULL THEN EXCLUDED.total_line ELSE ai_picks.total_line END,
+        payload = CASE WHEN ai_picks.frozen_at IS NULL THEN EXCLUDED.payload ELSE ai_picks.payload END,
         generated_at = CASE
-          WHEN ai_picks.frozen_at IS NULL AND EXCLUDED.frozen_at IS NOT NULL THEN ai_picks.generated_at
+          WHEN ai_picks.frozen_at IS NOT NULL THEN ai_picks.generated_at
+          WHEN EXCLUDED.frozen_at IS NOT NULL THEN ai_picks.generated_at
           ELSE EXCLUDED.generated_at
         END,
-        updated_at = now(),
+        updated_at = CASE WHEN ai_picks.frozen_at IS NULL THEN now() ELSE ai_picks.updated_at END,
         frozen_at = COALESCE(ai_picks.frozen_at, EXCLUDED.frozen_at)
       WHERE ai_picks.frozen_at IS NULL
         AND (
@@ -152,6 +225,19 @@ async function persistAiPicks(sql, cards) {
     saved += 1;
   }
   return { ok: true, saved };
+}
+
+async function listAiPicksByGameIds(sql, gameIds) {
+  if (!sql || !Array.isArray(gameIds) || !gameIds.length) return [];
+  const rows = [];
+  const seen = new Set();
+  for (const gameId of gameIds) {
+    if (!gameId || seen.has(gameId)) continue;
+    seen.add(gameId);
+    const found = await sql`SELECT * FROM ai_picks WHERE game_id = ${gameId}`;
+    for (const row of found || []) rows.push(row);
+  }
+  return rows;
 }
 
 async function listAiPicks(sql, filters = {}) {
@@ -174,6 +260,7 @@ async function listAiPicks(sql, filters = {}) {
 module.exports = {
   persistAiPicks,
   listAiPicks,
+  listAiPicksByGameIds,
   pickPayload,
   pickFromPayload,
   applyAiSnapshots,

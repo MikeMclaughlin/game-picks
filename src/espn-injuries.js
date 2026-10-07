@@ -149,8 +149,9 @@ function scrubOverlappingPick(aiPick, injuries, game) {
 
 function decorateCard(card, byTeam) {
   const injuries = injuriesForGame(card, byTeam);
-  const aiPickDisplay = scrubOverlappingPick(card && card.aiPick, injuries, card);
   const next = { ...(card || {}), injuries };
+  if (card && (card.aiPickFrozen || card.aiPickFreezeNow)) return next;
+  const aiPickDisplay = scrubOverlappingPick(card && card.aiPick, injuries, card);
   if (aiPickDisplay) next.aiPickDisplay = aiPickDisplay;
   return next;
 }
