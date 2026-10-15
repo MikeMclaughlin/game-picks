@@ -224,7 +224,6 @@ function mapUser(row, pool) {
     username: row.username,
     username_norm: row.username_norm,
     pool_id: row.pool_id,
-    clerk_user_id: row.clerk_user_id || null,
     email: row.email || null,
     google_sub: row.google_sub || null,
     auth_status: row.auth_status || null,
@@ -238,7 +237,7 @@ async function upsertGoogleUser(sql, pool, profile) {
   if (!sql || !pool || !sub) return null;
 
   const bySub = await sql`
-    SELECT u.id, u.username, u.username_norm, u.pool_id, u.clerk_user_id,
+    SELECT u.id, u.username, u.username_norm, u.pool_id,
            u.email, u.google_sub, u.auth_status, p.slug AS pool_slug
     FROM users u JOIN pools p ON p.id = u.pool_id
     WHERE u.google_sub = ${sub} AND u.pool_id = ${pool.id}
@@ -257,7 +256,7 @@ async function upsertGoogleUser(sql, pool, profile) {
 
   if (email) {
     const byEmail = await sql`
-      SELECT u.id, u.username, u.username_norm, u.pool_id, u.clerk_user_id,
+      SELECT u.id, u.username, u.username_norm, u.pool_id,
              u.email, u.google_sub, u.auth_status, p.slug AS pool_slug
       FROM users u JOIN pools p ON p.id = u.pool_id
       WHERE u.pool_id = ${pool.id} AND lower(u.email) = ${email}
@@ -269,7 +268,7 @@ async function upsertGoogleUser(sql, pool, profile) {
         UPDATE users
         SET google_sub = ${sub}, email = ${email}, auth_status = 'linked'
         WHERE id = ${open[0].id} AND (google_sub IS NULL OR google_sub = ${sub})
-        RETURNING id, username, username_norm, pool_id, clerk_user_id, email, google_sub, auth_status
+        RETURNING id, username, username_norm, pool_id, email, google_sub, auth_status
       `;
       if (linked[0]) return mapUser({ ...linked[0], pool_slug: open[0].pool_slug }, pool);
     }
@@ -285,7 +284,7 @@ async function upsertGoogleUser(sql, pool, profile) {
       const inserted = await sql`
         INSERT INTO users (pool_id, username, username_norm, email, google_sub, auth_status)
         VALUES (${pool.id}, ${safeDisplay}, ${norm}, ${email || null}, ${sub}, 'linked')
-        RETURNING id, username, username_norm, pool_id, clerk_user_id, email, google_sub, auth_status
+        RETURNING id, username, username_norm, pool_id, email, google_sub, auth_status
       `;
       return mapUser(inserted[0], pool);
     } catch (err) {

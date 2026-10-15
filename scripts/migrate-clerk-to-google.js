@@ -1,5 +1,9 @@
 'use strict';
 
+// One-time migration. Copies emails onto existing user rows so saved picks stay
+// on the same user id. Uses CLERK_SECRET_KEY only for that email copy.
+// Safe to re-run. Delete this file after the migration is confirmed.
+
 const fs = require('fs');
 const path = require('path');
 const { hasDatabase, getSql } = require('../src/db');

@@ -77,7 +77,7 @@ OUTRIGHT and ATS are mutually exclusive on the same game (O/U may coexist with e
 
 ## Product rules (server is source of truth)
 
-- Unique username handle per pool (`username_norm` = NFKC + trim + lower). Google accounts link by email onto the existing user id, including rows that still have `clerk_user_id`
+- Unique username handle per pool (`username_norm` = NFKC + trim + lower). Google accounts link by email onto the existing user id so saved picks stay on that row
 - One wager row per `(user, game, market)` where market is `outright | ats | ou`
 - OUTRIGHT and ATS cannot both be stored for the same user/game; saving one deletes the other. O/U is independent
 - Validate against the current line; reject after kickoff

@@ -1,6 +1,6 @@
 # Google sign-in (Game Picks)
 
-The server is plain Node HTTP. Neon (`DATABASE_URL`) stores users and wagers. Google sign-in uses Mike's OAuth client. The browser does not load Clerk.
+The server is plain Node HTTP. Neon (`DATABASE_URL`) stores users and wagers. Google sign-in uses Mike's OAuth client.
 
 Sessions are an HttpOnly `gp_session` cookie signed with `SESSION_SECRET` (`SameSite=Lax`, `Secure` on HTTPS). The OAuth start route is `/api/auth/google`. The callback is `PUBLIC_BASE_URL + /api/auth/google/callback`. PKCE (`S256`) and a signed `state` cookie protect the redirect.
 
@@ -22,6 +22,6 @@ Authorized JavaScript origin: the site origin, no trailing slash. Example: `http
 
 Without the Google vars, `/api/health` stays up with `auth: "missing"` and the header shows **Auth not configured**.
 
-## One-time Clerk migration
+## One-time email copy
 
-`node scripts/migrate-clerk-to-google.js` backs up `users`, `wagers`, `wager_results`, and `wager_history` to `/tmp/game-picks-user-backup-<timestamp>.json` before it writes. It copies Clerk emails onto the existing user rows when `CLERK_SECRET_KEY` is set, flags users with no email, and does not delete picks. Running it again does not change per-user wager counts. Google sign-in later attaches `google_sub` to the row with that email.
+The one-time script in `scripts/` (see the comment at the top of that file) backs up `users`, `wagers`, `wager_results`, and `wager_history` to `/tmp/game-picks-user-backup-<timestamp>.json` before it writes. It copies emails onto the existing user rows when that script's secret is set, flags users with no email, and does not delete picks. Running it again does not change per-user wager counts. Google sign-in later attaches `google_sub` to the row with that email. Delete the script after the migration is confirmed.

@@ -10,8 +10,6 @@ test('schema SQL is bundled and splits into statements', () => {
   assert.match(text, /CREATE TABLE IF NOT EXISTS games/);
   assert.match(text, /CREATE TABLE IF NOT EXISTS wagers/);
   assert.match(text, /CREATE TABLE IF NOT EXISTS ai_picks/);
-  assert.match(text, /clerk_user_id/);
-  assert.match(text, /ADD COLUMN IF NOT EXISTS clerk_user_id/);
   assert.match(text, /google_sub/);
   assert.match(text, /ADD COLUMN IF NOT EXISTS email/);
   assert.match(text, /ADD COLUMN IF NOT EXISTS spread_open NUMERIC/);

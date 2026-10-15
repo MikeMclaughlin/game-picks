@@ -366,7 +366,7 @@ async function currentUser(sql, req) {
   if (!session || !session.userId || !sql) return null;
   if (session.exp && Date.now() > Number(session.exp)) return null;
   const rows = await sql`
-    SELECT u.id, u.username, u.username_norm, u.pool_id, u.clerk_user_id,
+    SELECT u.id, u.username, u.username_norm, u.pool_id,
            u.email, u.google_sub, u.auth_status, p.slug AS pool_slug
     FROM users u JOIN pools p ON p.id = u.pool_id
     WHERE u.id = ${session.userId}

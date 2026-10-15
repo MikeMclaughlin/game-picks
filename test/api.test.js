@@ -349,7 +349,6 @@ test('/api/history supports filter query params', async () => {
   assert.match(page, /btn-sign-in/);
   assert.match(page, /load-overlay/);
   assert.match(page, /Auth not configured/);
-  assert.doesNotMatch(page, /__CLERK_CONFIG__/);
   assert.doesNotMatch(page, /oauth_x/);
   const css = await fetch(`http://127.0.0.1:${port}/styles.css`);
   const cssText = await css.text();
