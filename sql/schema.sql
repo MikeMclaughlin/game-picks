@@ -25,6 +25,17 @@ CREATE UNIQUE INDEX IF NOT EXISTS users_clerk_user_id_uidx
   ON users (clerk_user_id)
   WHERE clerk_user_id IS NOT NULL;
 
+ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS google_sub TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS auth_status TEXT;
+
+CREATE UNIQUE INDEX IF NOT EXISTS users_google_sub_uidx
+  ON users (google_sub)
+  WHERE google_sub IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS users_email_lower_idx
+  ON users (lower(email));
+
 CREATE TABLE IF NOT EXISTS games (
   game_id TEXT PRIMARY KEY,
   season INT NOT NULL,

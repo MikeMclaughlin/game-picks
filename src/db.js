@@ -65,7 +65,7 @@ function missingDbPayload(extra = {}) {
     ok: false,
     db: 'missing',
     error: 'DATABASE_URL is not set. Neon is required for sign-in, picks, grading, and import.',
-    hint: 'Set DATABASE_URL on the Vercel project. /api/health and the weekly schedule work without it.',
+    hint: 'Set DATABASE_URL on your hosting environment. /api/health and the weekly schedule work without it.',
     ...extra
   };
 }

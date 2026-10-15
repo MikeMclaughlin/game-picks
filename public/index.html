@@ -13,7 +13,7 @@
   <meta name="twitter:title" content="Game Picks">
   <meta name="twitter:description" content="Season pick-em · outright / ATS / O/U">
   <link rel="icon" href="/favicon.ico">
-  <link rel="stylesheet" href="/styles.css?v=version-1.16">
+  <link rel="stylesheet" href="/styles.css?v=version-1.17">
 </head>
 <body>
   <header class="top">
@@ -38,21 +38,33 @@
       </nav>
       <div id="auth-slot" class="auth-slot">
         <p id="auth-notice" class="auth-notice" hidden>Auth not configured</p>
-        <div id="clerk-signed-out" class="clerk-signed-out" hidden>
+        <div id="auth-signed-out" class="auth-signed-out" hidden>
           <span class="auth-label">Social Media sign in</span>
-          <button type="button" data-oauth="oauth_google" title="Sign in with Google">Google</button>
-          <button type="button" data-oauth="oauth_x" title="Sign in with X">X</button>
-          <button type="button" id="btn-sign-in" title="Sign in with Google or X">Sign in</button>
-          <button type="button" id="btn-sign-up" title="Create an account">Sign up</button>
+          <button type="button" id="btn-google" data-oauth="google" title="Sign in with Google">Google</button>
+          <button type="button" id="btn-sign-in" title="Sign in with Google">Sign in</button>
+          <button type="button" id="btn-sign-up" title="Create an account with Google">Sign up</button>
         </div>
-        <div id="clerk-user-button" class="clerk-user-button" hidden></div>
+        <div id="user-button" class="user-button" hidden>
+          <button type="button" id="user-menu-btn" title="Account">
+            <span class="user-avatar" id="user-avatar" aria-hidden="true"></span>
+            <span class="sr" id="user-menu-label">Account</span>
+          </button>
+          <div id="user-menu" class="user-menu" hidden>
+            <button type="button" id="btn-sign-out" title="Sign out">Sign out</button>
+          </div>
+        </div>
         <span id="who" class="who"></span>
       </div>
     </div>
   </header>
   <p id="db-banner" class="db-banner" hidden></p>
-  <main id="app"></main>
-  <footer class="site-foot" id="build-foot">Game Picks · Version 1.16</footer>
-  <script src="/app.js?v=version-1.16"></script>
+  <main id="app">
+    <div id="app-view"></div>
+    <div id="load-overlay" class="load-overlay" hidden>
+      <div class="load-spinner" role="status" aria-label="Loading"></div>
+    </div>
+  </main>
+  <footer class="site-foot" id="build-foot">Game Picks · Version 1.17</footer>
+  <script src="/app.js?v=version-1.17"></script>
 </body>
 </html>

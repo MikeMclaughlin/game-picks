@@ -1,41 +1,15 @@
 (() => {
-  const app = document.getElementById('app');
+  const app = document.getElementById('app-view');
+  const loadOverlay = document.getElementById('load-overlay');
   const tabs = document.getElementById('tabs');
   const who = document.getElementById('who');
   const authNotice = document.getElementById('auth-notice');
-  const signedOutEl = document.getElementById('clerk-signed-out');
-  const userButtonEl = document.getElementById('clerk-user-button');
+  const signedOutEl = document.getElementById('auth-signed-out');
+  const userButtonEl = document.getElementById('user-button');
+  const userMenuEl = document.getElementById('user-menu');
+  const userAvatarEl = document.getElementById('user-avatar');
   const btnSignIn = document.getElementById('btn-sign-in');
   const btnSignUp = document.getElementById('btn-sign-up');
-
-  const CLERK_APPEARANCE = {
-    variables: {
-      colorPrimary: '#FFB81C',
-      colorBackground: '#111111',
-      colorInputBackground: '#0b0b0b',
-      colorInputText: '#ffffff',
-      colorText: '#ffffff',
-      colorTextSecondary: '#b0b0b0',
-      colorTextOnPrimaryBackground: '#111111',
-      colorNeutral: '#ffffff',
-      borderRadius: '4px'
-    },
-    elements: {
-      card: { backgroundColor: '#161616', boxShadow: 'none', border: '1px solid #2a2a2a' },
-      headerTitle: { color: '#ffffff' },
-      headerSubtitle: { color: '#b0b0b0' },
-      socialButtonsBlockButton: {
-        backgroundColor: '#1a1a1a',
-        borderColor: '#FFB81C',
-        color: '#ffffff'
-      },
-      socialButtonsBlockButton__apple: { display: 'none' },
-      socialButtonsIconButton__apple: { display: 'none' },
-      formButtonPrimary: { backgroundColor: '#FFB81C', color: '#111111' },
-      userButtonOuterIdentifier: { display: 'none' },
-      userButtonTrigger: { padding: '0px' }
-    }
-  };
 
   const state = {
     page: 'week',
@@ -102,10 +76,15 @@
     shareGame: null,
     shareSeason: null,
     shareMissing: false,
-    shareSolo: false
+    shareSolo: false,
+    forceWeek: false,
+    forceHistory: false,
+    forceBacktest: false,
+    forcePerformance: false,
+    forceStandings: false
   };
-  let clerk = null;
-  let lastClerkUserId = undefined;
+  let loadDepth = 0;
+  let authConfigured = false;
   const DEFAULT_HIST = {
     team: 'ALL',
     from: 2016,
@@ -476,11 +455,11 @@
         state.shareSeason = route.season;
         state.selectedWeek = route.week;
       }
-      state.week = null;
+      state.forceWeek = true;
       selectPage('week', { fromHistory: true, reload: true, keepShare: true });
       return;
     }
-    state.week = null;
+    state.forceWeek = true;
     selectPage(route.page, { fromHash: true, fromHistory: true, reload: true, keepShare: true });
   }
 
@@ -493,21 +472,21 @@
 
   function resetPageData(page) {
     if (page === 'history') {
-      state.history = null;
       state.historyError = null;
       state.historyLoading = true;
+      state.forceHistory = true;
     } else if (page === 'backtest') {
-      state.backtest = null;
       state.backtestError = null;
       state.backtestLoading = true;
+      state.forceBacktest = true;
     } else if (page === 'week') {
-      state.week = null;
+      state.forceWeek = true;
     } else if (page === 'standings') {
-      state.standings = null;
+      state.forceStandings = true;
     } else if (page === 'performance') {
-      state.performance = null;
       state.performanceError = null;
       state.performanceLoading = true;
+      state.forcePerformance = true;
     }
   }
 
@@ -526,7 +505,7 @@
       state.shareSolo = false;
       if (next === 'week') {
         state.selectedWeek = null;
-        state.week = null;
+        state.forceWeek = true;
       }
     }
     if (fromHash) applyHashState();
@@ -693,16 +672,18 @@
     dbBanner.textContent = payload.hint ? `${payload.error} ${payload.hint}` : text;
   }
 
+  function beginLoad() {
+    loadDepth += 1;
+    if (loadOverlay) loadOverlay.hidden = false;
+  }
+
+  function endLoad() {
+    loadDepth = Math.max(0, loadDepth - 1);
+    if (loadOverlay && loadDepth === 0) loadOverlay.hidden = true;
+  }
+
   async function api(path, opts) {
     const headers = { 'content-type': 'application/json', ...(opts && opts.headers) };
-    if (clerk && clerk.session) {
-      try {
-        const token = await clerk.session.getToken();
-        if (token) headers.Authorization = `Bearer ${token}`;
-      } catch {
-        /* signed out or token unavailable */
-      }
-    }
     const res = await fetch(path, {
       credentials: 'same-origin',
       headers,
@@ -734,147 +715,26 @@
     authNotice.textContent = message;
   }
 
-  function clerkConfigFrom(payload) {
-    if (payload && payload.clerk) return payload.clerk;
-    if (payload && Object.prototype.hasOwnProperty.call(payload, 'configured')) return payload;
-    return window.__CLERK_CONFIG__ || { configured: false };
-  }
-
-  function frontendApiFromKey(key) {
-    try {
-      const packed = String(key || '').split('_').slice(2).join('_');
-      if (!packed) return null;
-      const decoded = atob(packed.replace(/-/g, '+').replace(/_/g, '/'));
-      return decoded.replace(/\$+$/, '') || null;
-    } catch {
-      return null;
-    }
-  }
-
-  function loadScript(src, attrs) {
-    return new Promise((resolve, reject) => {
-      const s = document.createElement('script');
-      s.src = src;
-      s.async = true;
-      s.crossOrigin = 'anonymous';
-      if (attrs) Object.keys(attrs).forEach((k) => { s.setAttribute(k, attrs[k]); });
-      s.onload = resolve;
-      s.onerror = () => reject(new Error(`Failed to load ${src}`));
-      document.head.appendChild(s);
-    });
-  }
-
-  async function initClerkSdk(cfg) {
-    const key = cfg && cfg.publishableKey;
-    if (!key) throw new Error('Missing Clerk publishable key');
-    const domain = cfg.frontendApi || frontendApiFromKey(key);
-    if (domain) {
-      try {
-        try {
-          await loadScript(`https://${domain}/npm/@clerk/ui@1/dist/ui.browser.js`);
-        } catch {
-          /* UI bundle optional on older clerk-js */
-        }
-        await loadScript(`https://${domain}/npm/@clerk/clerk-js@6/dist/clerk.browser.js`, {
-          'data-clerk-publishable-key': key
-        });
-        if (window.Clerk && typeof window.Clerk.load === 'function') {
-          const opts = { appearance: CLERK_APPEARANCE };
-          if (window.__internal_ClerkUICtor) opts.ui = { ClerkUI: window.__internal_ClerkUICtor };
-          await window.Clerk.load(opts);
-          return window.Clerk;
-        }
-      } catch (err) {
-        console.warn('Clerk FAPI CDN failed, trying jsDelivr', err);
-      }
-    }
-    await loadScript('https://cdn.jsdelivr.net/npm/@clerk/clerk-js@5/dist/clerk.browser.js');
-    const ClerkGlobal = window.Clerk;
-    if (!ClerkGlobal) throw new Error('Clerk browser SDK failed to load');
-    const instance = typeof ClerkGlobal === 'function' ? new ClerkGlobal(key) : ClerkGlobal;
-    await instance.load({ appearance: CLERK_APPEARANCE });
-    return instance;
-  }
-
-  function renderAuthChrome() {
-    const signedIn = Boolean(clerk && clerk.isSignedIn);
-    if (signedOutEl) signedOutEl.hidden = signedIn;
-    if (userButtonEl) {
-      userButtonEl.hidden = !signedIn;
-      if (signedIn && clerk && typeof clerk.mountUserButton === 'function' && !userButtonEl.dataset.mounted) {
-        clerk.mountUserButton(userButtonEl, { appearance: CLERK_APPEARANCE, showName: false });
-        userButtonEl.dataset.mounted = '1';
-      }
-    }
-  }
-
-  async function syncClerkUser() {
-    if (!clerk || !clerk.session) return;
-    try {
-      const data = await api('/api/login', { method: 'POST', body: '{}' });
-      if (state.bootstrap) state.bootstrap.user = data.user;
-      setWho(data.user);
-    } catch (err) {
-      showBanner(err.payload || { error: err.message });
-    }
-  }
-
-  async function startOAuth(strategy) {
-    if (!clerk || !clerk.client || !clerk.client.signIn) {
-      throw new Error('Clerk is still loading');
-    }
-    const redirectUrl = `${window.location.origin}/`;
-    const strategies = strategy === 'oauth_x' ? ['oauth_x', 'oauth_twitter'] : [strategy];
-    let lastErr = null;
-    for (const s of strategies) {
-      try {
-        await clerk.client.signIn.authenticateWithRedirect({
-          strategy: s,
-          redirectUrl,
-          redirectUrlComplete: redirectUrl
-        });
-        return;
-      } catch (err) {
-        lastErr = err;
-      }
-    }
-    throw lastErr || new Error('Social sign-in failed');
-  }
-
-  async function setupClerk(cfg) {
-    if (!cfg || !cfg.configured || !cfg.publishableKey) {
-      showAuthNotice('Auth not configured. Set CLERK_SECRET_KEY and CLERK_PUBLISHABLE_KEY (see AUTH.md).');
+  function renderAuthChrome(user) {
+    const signedIn = Boolean(user && user.id);
+    if (!authConfigured) {
+      showAuthNotice('Auth not configured. Set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and SESSION_SECRET.');
       if (signedOutEl) signedOutEl.hidden = true;
       if (userButtonEl) userButtonEl.hidden = true;
       return;
     }
     showAuthNotice('');
-    try {
-      clerk = await initClerkSdk(cfg);
-    } catch (err) {
-      showAuthNotice(err.message || 'Auth not configured');
-      return;
+    if (signedOutEl) signedOutEl.hidden = signedIn;
+    if (userButtonEl) userButtonEl.hidden = !signedIn;
+    if (userMenuEl && !signedIn) userMenuEl.hidden = true;
+    if (userAvatarEl) {
+      const name = user && user.username ? String(user.username) : '';
+      userAvatarEl.textContent = name ? name.slice(0, 1).toUpperCase() : '';
     }
-    renderAuthChrome();
-    lastClerkUserId = clerk.isSignedIn ? (clerk.user && clerk.user.id) || null : null;
-    clerk.addListener(({ user }) => {
-      const id = (user && user.id) || null;
-      if (id === lastClerkUserId) return;
-      lastClerkUserId = id;
-      renderAuthChrome();
-      setWho(state.bootstrap && state.bootstrap.user);
-      state.bootstrap = null;
-      state.week = null;
-      if (id) {
-        syncClerkUser().then(() => load()).catch(showPageError);
-      } else {
-        api('/api/logout', { method: 'POST', body: '{}' }).catch(() => {});
-        load().catch(showPageError);
-      }
-    });
-    if (clerk.isSignedIn) {
-      await syncClerkUser();
-    }
+  }
+
+  function startGoogle(mode) {
+    window.location.assign(`/api/auth/google?mode=${mode === 'signup' ? 'signup' : 'signin'}`);
   }
 
   function backtestQuery(filters, chain) {
@@ -967,23 +827,32 @@
   }
 
   if (signedOutEl) {
-    signedOutEl.addEventListener('click', async (e) => {
-      const oauth = e.target.closest('[data-oauth]');
-      if (oauth) {
-        try {
-          await startOAuth(oauth.dataset.oauth);
-        } catch (err) {
-          showBanner({ error: err.message || 'Social sign-in failed' });
-        }
+    signedOutEl.addEventListener('click', (e) => {
+      if (e.target.closest('#btn-sign-up')) {
+        startGoogle('signup');
         return;
       }
-      if (e.target.closest('#btn-sign-in') && clerk && typeof clerk.openSignIn === 'function') {
-        clerk.openSignIn({ appearance: CLERK_APPEARANCE, withSignUp: true });
-        return;
+      if (e.target.closest('#btn-sign-in') || e.target.closest('[data-oauth="google"]')) {
+        startGoogle('signin');
       }
-      if (e.target.closest('#btn-sign-up') && clerk && typeof clerk.openSignUp === 'function') {
-        clerk.openSignUp({ appearance: CLERK_APPEARANCE });
+    });
+  }
+  const userMenuBtn = document.getElementById('user-menu-btn');
+  if (userMenuBtn && userMenuEl) {
+    userMenuBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      userMenuEl.hidden = !userMenuEl.hidden;
+    });
+  }
+  const btnSignOut = document.getElementById('btn-sign-out');
+  if (btnSignOut) {
+    btnSignOut.addEventListener('click', async () => {
+      try {
+        await api('/api/logout', { method: 'POST', body: '{}' });
+      } catch {
+        /* still leave the signed-in screen */
       }
+      window.location.assign('/');
     });
   }
   if (btnSignIn) btnSignIn.type = 'button';
@@ -991,32 +860,35 @@
 
   async function load() {
     const gen = ++loadGen;
+    beginLoad();
+    try {
+    if (app && !app.innerHTML) app.innerHTML = '<p>Loading…</p>';
     if (!state.bootstrap) state.bootstrap = await api('/api/bootstrap');
     if (gen !== loadGen) return;
     setWho(state.bootstrap.user);
-    const cfg = clerkConfigFrom(state.bootstrap);
-    if (!cfg.configured) {
-      showAuthNotice('Auth not configured. Set CLERK_SECRET_KEY and CLERK_PUBLISHABLE_KEY (see AUTH.md).');
-    } else {
-      showAuthNotice('');
-    }
+    authConfigured = Boolean(state.bootstrap.auth && state.bootstrap.auth.configured);
+    renderAuthChrome(state.bootstrap.user);
     if (state.bootstrap.db) showBanner(null);
     else {
       showBanner({
         error: 'Database is not connected yet.',
-        hint: 'Browse the week now. Sign-in and saved picks wait on DATABASE_URL (Neon on Vercel).'
+        hint: 'Browse the week now. Sign-in and saved picks wait on DATABASE_URL (Neon on your hosting environment).'
       });
     }
     // Avoid painting bootstrap (often the finished current week) while the selected week reloads.
     const shareInvalid = Boolean(state.shareGame && state.shareGame.invalid);
-    const pendingWeek = state.page === 'week' && !state.week && !shareInvalid;
-    if (!pendingWeek) render();
+    const pendingWeek = state.page === 'week' && (!state.week || state.forceWeek) && !shareInvalid;
+    const refreshing = (state.page === 'history' && state.forceHistory && state.history)
+      || (state.page === 'backtest' && state.forceBacktest && state.backtest)
+      || (state.page === 'performance' && state.forcePerformance && state.performance);
+    if (!pendingWeek && !refreshing) render();
     try {
       if (pendingWeek) {
         const season = state.shareSeason || state.bootstrap.season;
         const weekNum = state.selectedWeek || state.bootstrap.week;
         const week = await api(`/api/week?season=${encodeURIComponent(season)}&week=${encodeURIComponent(weekNum)}`);
         if (gen !== loadGen) return;
+        state.forceWeek = false;
         state.week = week;
         if (state.shareGame && !state.shareGame.invalid) {
           const found = (week.games || []).some((g) => g.game_id === state.shareGame.gameId);
@@ -1024,11 +896,12 @@
           if (found) cardOpen.set(state.shareGame.gameId, true);
         }
       }
-      if (state.page === 'performance' && !state.performance) {
+      if (state.page === 'performance' && (!state.performance || state.forcePerformance)) {
         state.performanceLoading = true;
         const seasonQ = state.performanceSeason ? `?season=${encodeURIComponent(state.performanceSeason)}` : '';
         const performance = await api(`/api/performance${seasonQ}`);
         if (gen !== loadGen) return;
+        state.forcePerformance = false;
         state.performance = performance;
         state.performanceError = null;
         state.performanceLoading = false;
@@ -1040,15 +913,17 @@
           if (!ids.includes(state.performanceCriterion)) state.performanceCriterion = ids[0];
         }
       }
-      if (state.page === 'standings' && !state.standings) {
+      if (state.page === 'standings' && (!state.standings || state.forceStandings)) {
         const standings = await api('/api/standings');
         if (gen !== loadGen) return;
+        state.forceStandings = false;
         state.standings = standings;
       }
-      if (state.page === 'history' && !state.history) {
+      if (state.page === 'history' && (!state.history || state.forceHistory)) {
         state.historyLoading = true;
         const history = await api(`/api/history?${historyQuery()}`);
         if (gen !== loadGen) return;
+        state.forceHistory = false;
         state.history = history;
         state.historyError = null;
         state.historyLoading = false;
@@ -1059,10 +934,11 @@
           }
         }
       }
-      if (state.page === 'backtest' && !state.backtest) {
+      if (state.page === 'backtest' && (!state.backtest || state.forceBacktest)) {
         state.backtestLoading = true;
         const backtest = await api(`/api/backtest?${backtestQuery()}`);
         if (gen !== loadGen) return;
+        state.forceBacktest = false;
         state.backtest = backtest;
         state.backtestError = null;
         state.backtestLoading = false;
@@ -1105,6 +981,9 @@
     render();
     revealSharedGame();
     syncLivePoll();
+    } finally {
+      endLoad();
+    }
   }
 
   function passFilters(g) {
@@ -1837,8 +1716,8 @@
         body: JSON.stringify({ game_id: gid, market, selection: nextSel })
       });
       // Keep bootstrap; only refetch the selected week so open cards never flash collapsed.
-      state.week = null;
-      state.standings = null;
+      state.forceWeek = true;
+      state.forceStandings = true;
       await load();
     } catch (err) {
       alert(err.message);
@@ -2476,7 +2355,7 @@
   function backtestView() {
     let body;
     if (state.backtestError) body = `<p class="notice">${esc(state.backtestError)}</p>`;
-    else if (state.backtestLoading || !state.backtest) body = '<p class="hist-loading">Loading backtest…</p>';
+    else if (!state.backtest) body = '<p class="hist-loading">Loading backtest…</p>';
     else {
       const data = state.backtest;
       const games = data.games || [];
@@ -2504,7 +2383,7 @@
   function historyView() {
     let body;
     if (state.historyError) body = `<p class="notice">${state.historyError}</p>`;
-    else if (state.historyLoading || !state.history) body = '<p class="hist-loading">Loading history…</p>';
+    else if (!state.history) body = '<p class="hist-loading">Loading history…</p>';
     else {
       const rows = (state.history.rows || []).filter((r) => r && r.games > 0);
       const games = state.history.gameRows || [];
@@ -2545,10 +2424,10 @@
   function reloadHistory() {
     persistHistory();
     state.historyTeam = state.historyFilters.team;
-    state.history = null;
     state.historyError = null;
     state.historyLoading = true;
-    render();
+    state.forceHistory = true;
+    if (!state.history) render();
     load().catch((err) => {
       state.historyError = (err && err.message) || 'Failed to load history';
       state.historyLoading = false;
@@ -2575,10 +2454,10 @@
 
   function reloadBacktest() {
     persistBacktest();
-    state.backtest = null;
     state.backtestError = null;
     state.backtestLoading = true;
-    render();
+    state.forceBacktest = true;
+    if (!state.backtest) render();
     load().catch((err) => {
       state.backtestError = (err && err.message) || 'Failed to load backtest';
       state.backtestLoading = false;
@@ -3012,7 +2891,7 @@
 
   function render() {
     if (!state.bootstrap) {
-      app.innerHTML = '<p>Loading…</p>';
+      if (!app.innerHTML) app.innerHTML = '<p>Loading…</p>';
       return;
     }
     if (state.page === 'week') app.innerHTML = weekView();
@@ -3221,7 +3100,7 @@
         state.shareMissing = false;
         state.shareSolo = false;
         state.selectedWeek = Number(weekSel.value);
-        state.week = null;
+        state.forceWeek = true;
         cardOpen.clear();
         persistWeek();
         load().catch(showPageError);
@@ -3230,11 +3109,11 @@
       const perfSeason = e.target.closest('[data-perf-season]');
       if (perfSeason) {
         state.performanceSeason = Number(perfSeason.value);
-        state.performance = null;
         state.performanceError = null;
         state.performanceLoading = true;
+        state.forcePerformance = true;
         syncLocation('performance', 'replace');
-        render();
+        if (!state.performance) render();
         load().catch((err) => {
           state.performanceError = (err && err.message) || 'Failed to load pick performance';
           state.performanceLoading = false;
@@ -3269,18 +3148,12 @@
   }
 
   (async () => {
-    let cfg = window.__CLERK_CONFIG__;
-    if (!cfg) {
-      try {
-        cfg = await api('/api/auth/config');
-      } catch {
-        cfg = { configured: false };
-      }
-    }
-    try {
-      await setupClerk(cfg);
-    } catch (err) {
-      showAuthNotice(err.message || 'Auth not configured');
+    const params = new URLSearchParams(location.search);
+    if (params.get('auth_error')) {
+      showAuthNotice('Google sign-in did not finish. Try again.');
+      params.delete('auth_error');
+      const next = `${location.pathname}${params.toString() ? `?${params}` : ''}${location.hash}`;
+      history.replaceState({}, '', next);
     }
     await load();
   })().catch(showPageError);
