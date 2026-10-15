@@ -31,7 +31,7 @@ test('/api/health returns JSON', async () => {
   server.close();
 });
 
-test('/api/login without Clerk keys returns JSON 503', async () => {
+test('/api/login without Google keys returns JSON 503', async () => {
   const server = await listen();
   const { port } = server.address();
   const res = await fetch(`http://127.0.0.1:${port}/api/login`, {
@@ -55,9 +55,9 @@ test('/api/auth/config is public and omits secrets', async () => {
   assert.equal(res.status, 200);
   assert.equal(body.ok, true);
   assert.equal(body.configured, false);
-  assert.equal(body.publishableKey, null);
+  assert.equal(body.provider, 'google');
   assert.equal(Object.prototype.hasOwnProperty.call(body, 'secretKey'), false);
-  assert.deepEqual(body.providers, ['google', 'x']);
+  assert.equal(Object.prototype.hasOwnProperty.call(body, 'GOOGLE_CLIENT_SECRET'), false);
   server.close();
 });
 
@@ -87,7 +87,7 @@ test('/api/bootstrap returns JSON week payload', async () => {
   assert.ok(Array.isArray(body.games));
   assert.ok(body.season >= 2023);
   assert.ok(body.week >= 1);
-    assert.equal(body.clerk.configured, false);
+    assert.equal(body.auth.configured, false);
     assert.equal(Object.prototype.hasOwnProperty.call(body, 'livePoll'), true);
   if (body.games.length) {
     const g = body.games[0];
@@ -345,10 +345,12 @@ test('/api/history supports filter query params', async () => {
   assert.doesNotMatch(page, /data-page="rules"/);
   assert.doesNotMatch(page, /oauth_apple/);
   assert.doesNotMatch(page, />Apple</);
-  assert.match(page, /clerk-user-button/);
+  assert.match(page, /user-button/);
   assert.match(page, /btn-sign-in/);
+  assert.match(page, /load-overlay/);
   assert.match(page, /Auth not configured/);
-  assert.match(page, /__CLERK_CONFIG__/);
+  assert.doesNotMatch(page, /__CLERK_CONFIG__/);
+  assert.doesNotMatch(page, /oauth_x/);
   const css = await fetch(`http://127.0.0.1:${port}/styles.css`);
   const cssText = await css.text();
   assert.match(cssText, /\.picks \{ display: grid; gap: 4px; margin-top: auto; \}/);

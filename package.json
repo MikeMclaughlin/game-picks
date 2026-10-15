@@ -15,7 +15,6 @@
     "test": "node --test test/*.test.js"
   },
   "dependencies": {
-    "@clerk/backend": "^3.18.1",
     "@neondatabase/serverless": "^1.0.2"
   }
 }

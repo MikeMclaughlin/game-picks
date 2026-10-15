@@ -8,7 +8,7 @@ Each game can take up to three independent wagers — outright winner, against t
 
 - Node.js `http` server only (no Express, no Next.js)
 - Neon Postgres via `DATABASE_URL` and `@neondatabase/serverless` (HTTP)
-- Clerk social sign-in (Google, X/Twitter) via `@clerk/backend` + Clerk browser CDN
+- Google sign-in (OAuth authorization code + PKCE) and a signed `gp_session` cookie
 - Vanilla `public/index.html`, `public/styles.css`, `public/app.js`
 - Schedule, lines, history, and finals grading from [nfldata.org](https://www.nfldata.org/) / nflverse (`spread_line`, `total_line`, scores), with GitHub mirrors and `data/schedule-2026.json` as fallback
 - Live / in-progress scores on Home cards from ESPN’s public scoreboard JSON (`site.web.api.espn.com`). Display only — not used to grade wagers
@@ -18,9 +18,10 @@ Each game can take up to three independent wagers — outright winner, against t
 | Name | Required | Purpose |
 | --- | --- | --- |
 | `DATABASE_URL` | Yes, to persist users / wagers / standings | Neon Postgres connection string |
-| `CLERK_SECRET_KEY` | Yes, for sign-in | Clerk secret key (`sk_…`) |
-| `CLERK_PUBLISHABLE_KEY` | Yes, for sign-in | Clerk publishable key (`pk_…`). `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` is also accepted (Marketplace name) |
-| `CLERK_JWT_KEY` | Optional | PEM JWT public key for networkless verify |
+| `GOOGLE_CLIENT_ID` | Yes, for sign-in | Google OAuth client id |
+| `GOOGLE_CLIENT_SECRET` | Yes, for sign-in | Google OAuth client secret |
+| `SESSION_SECRET` | Yes, for sign-in | HMAC key for the session cookie |
+| `PUBLIC_BASE_URL` | Optional | Site origin, no trailing slash. Defaults to `https://game-picks.vercel.app` |
 | `ADMIN_KEY` | Optional | When set, `/api/import`, `/api/grade-all`, `/api/cron/scores`, and `/api/cron/live-scores` require header `x-admin-key` (or `?key=`). `Authorization: Bearer CRON_SECRET` is also accepted |
 | `CRON_SECRET` | Optional | Vercel cron Bearer token; allowed when `ADMIN_KEY` is set |
 | `PORT` | Optional | Local listen port (default `3000`) |
@@ -37,7 +38,7 @@ Do not commit secrets. Copy `.env.example` to `.env` locally.
 
 Without `DATABASE_URL`, `npm start` still boots. `/api/health` and `/api/bootstrap` still return JSON from the bundled 2016–2026 seed / 2026 schedule. Sign-in and saved picks require the database.
 
-Without Clerk keys, the app still boots. `/api/health` returns `auth: "missing"`. The header shows **Auth not configured** instead of crashing. See **[AUTH.md](AUTH.md)** for Vercel env vars and enabling Google and X/Twitter in the Clerk Dashboard.
+Without the Google env vars, the app still boots. `/api/health` returns `auth: "missing"`. The header shows **Auth not configured** instead of crashing. See **[AUTH.md](AUTH.md)**.
 
 ## Run locally
 
@@ -76,7 +77,7 @@ OUTRIGHT and ATS are mutually exclusive on the same game (O/U may coexist with e
 
 ## Product rules (server is source of truth)
 
-- Unique username handle per pool (`username_norm` = NFKC + trim + lower), keyed to Clerk via `clerk_user_id`
+- Unique username handle per pool (`username_norm` = NFKC + trim + lower). Google accounts link by email onto the existing user id, including rows that still have `clerk_user_id`
 - One wager row per `(user, game, market)` where market is `outright | ats | ou`
 - OUTRIGHT and ATS cannot both be stored for the same user/game; saving one deletes the other. O/U is independent
 - Validate against the current line; reject after kickoff
@@ -91,4 +92,4 @@ OUTRIGHT and ATS are mutually exclusive on the same game (O/U may coexist with e
 
 `vercel.json` routes all traffic to `server.js` (`@vercel/node`) and includes `public/**`, `src/**`, and `data/**`. Do not switch to `/api/[...path]` rewrites.
 
-Set `DATABASE_URL` plus Clerk keys on the Vercel project (`CLERK_SECRET_KEY` and `CLERK_PUBLISHABLE_KEY` or `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`), enable Google and X in the Clerk Dashboard (see [AUTH.md](AUTH.md)), then deploy.
+Set `DATABASE_URL`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `SESSION_SECRET`, and `PUBLIC_BASE_URL` on the host (see [AUTH.md](AUTH.md)), then deploy. The same server runs on Vercel or Render.

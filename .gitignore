@@ -140,6 +140,10 @@ dist
 # Cached nflverse injury reports (fetched on demand for Backtest)
 data/cache/
 
+# Clerk migration backups (user data; never commit)
+backups/
+game-picks-user-backup*.json
+
 # Vite files
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*

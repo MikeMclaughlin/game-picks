@@ -9,19 +9,28 @@ const {
   json,
   readBody,
   readSession,
+  signSession,
+  sessionCookie,
   clearCookie,
+  cookieSecure,
   requireAdmin,
   mapGame,
   getPool
 } = require('./http-util');
 const {
-  isClerkConfigured,
-  publicClerkConfig,
+  isGoogleConfigured,
+  publicAuthConfig,
   authNotConfiguredPayload,
-  authenticateClerk,
-  fetchClerkUser,
-  upsertPoolUser
-} = require('./clerk-auth');
+  createPkce,
+  googleAuthorizeUrl,
+  oauthCookieValue,
+  readOauthCookie,
+  statesMatch,
+  exchangeGoogleCode,
+  upsertGoogleUser,
+  OAUTH_COOKIE,
+  OAUTH_MAX_AGE
+} = require('./google-auth');
 const { validatePick, gradeAll, isLocked, exclusivePartner, assertExclusivePicks } = require('./grader');
 const { importGames, loadSeedGames, loadSchedule2026, defaultSeasons } = require('./nfl-data');
 const { enrichGame, currentSeasonWeek, annotateCard, weekVersus, compareWeekGames, formatSpreadFavorite } = require('./week-view');
@@ -258,10 +267,6 @@ async function serveAppDocument(req, res, url) {
     return;
   }
   let html = stampHtml(fs.readFileSync(index, 'utf8'));
-  const cfg = JSON.stringify(publicClerkConfig());
-  if (!html.includes('window.__CLERK_CONFIG__')) {
-    html = html.replace('</head>', `<script>window.__CLERK_CONFIG__=${cfg};</script>\n</head>`);
-  }
   html = applyOpenGraph(html, await openGraphFor(req, url));
   const body = Buffer.from(html, 'utf8');
   res.writeHead(200, {
@@ -312,12 +317,7 @@ function sendFile(res, filePath) {
   const type = MIME[ext] || 'application/octet-stream';
   let body = fs.readFileSync(filePath);
   if (ext === '.html') {
-    let html = stampHtml(body.toString('utf8'));
-    const cfg = JSON.stringify(publicClerkConfig());
-    if (!html.includes('window.__CLERK_CONFIG__')) {
-      html = html.replace('</head>', `<script>window.__CLERK_CONFIG__=${cfg};</script>\n</head>`);
-    }
-    body = Buffer.from(html, 'utf8');
+    body = Buffer.from(stampHtml(body.toString('utf8')), 'utf8');
   }
   const noStore = ext === '.html' || ext === '.js' || ext === '.css';
   res.writeHead(200, {
@@ -362,24 +362,12 @@ async function gamesForWeek(sql, season, week) {
 }
 
 async function currentUser(sql, req) {
-  if (sql) {
-    const clerk = await authenticateClerk(req);
-    if (clerk.userId) {
-      const pool = await getPool(sql);
-      const existing = await sql`
-        SELECT u.id, u.username, u.username_norm, u.pool_id, u.clerk_user_id, p.slug AS pool_slug
-        FROM users u JOIN pools p ON p.id = u.pool_id
-        WHERE u.clerk_user_id = ${clerk.userId} AND u.pool_id = ${pool.id}
-      `;
-      if (existing[0]) return existing[0];
-      const profile = await fetchClerkUser(clerk.userId);
-      return upsertPoolUser(sql, pool, profile || { id: clerk.userId });
-    }
-  }
   const session = readSession(req.headers.cookie);
   if (!session || !session.userId || !sql) return null;
+  if (session.exp && Date.now() > Number(session.exp)) return null;
   const rows = await sql`
-    SELECT u.id, u.username, u.username_norm, u.pool_id, u.clerk_user_id, p.slug AS pool_slug
+    SELECT u.id, u.username, u.username_norm, u.pool_id, u.clerk_user_id,
+           u.email, u.google_sub, u.auth_status, p.slug AS pool_slug
     FROM users u JOIN pools p ON p.id = u.pool_id
     WHERE u.id = ${session.userId}
   `;
@@ -391,8 +379,7 @@ function publicUser(user) {
   return {
     id: user.id,
     username: user.username,
-    pool: user.pool_slug,
-    clerk_user_id: user.clerk_user_id || null
+    pool: user.pool_slug
   };
 }
 
@@ -403,8 +390,8 @@ function authMissing(res) {
 function signInRequired(res) {
   return json(res, 401, {
     ok: false,
-    error: isClerkConfigured()
-      ? 'Sign in with Google or X to continue'
+    error: isGoogleConfigured()
+      ? 'Sign in with Google to continue'
       : 'Auth not configured'
   });
 }
@@ -530,7 +517,7 @@ async function handleApi(req, res, url) {
         build: BUILD,
         version: BUILD,
         db: 'missing',
-        auth: isClerkConfigured() ? 'ok' : 'missing',
+        auth: isGoogleConfigured() ? 'ok' : 'missing',
         time: new Date().toISOString()
       });
     }
@@ -543,7 +530,7 @@ async function handleApi(req, res, url) {
         version: BUILD,
         db: dbPing.ok ? 'ok' : 'error',
         database: dbPing.ok ? 'ok' : dbPing.reason,
-        auth: isClerkConfigured() ? 'ok' : 'missing',
+        auth: isGoogleConfigured() ? 'ok' : 'missing',
         time: new Date().toISOString()
       });
     } catch (err) {
@@ -554,14 +541,36 @@ async function handleApi(req, res, url) {
         version: BUILD,
         db: 'error',
         database: err.message,
-        auth: isClerkConfigured() ? 'ok' : 'missing',
+        auth: isGoogleConfigured() ? 'ok' : 'missing',
         time: new Date().toISOString()
       });
     }
   }
 
   if (pathname === '/api/auth/config' && method === 'GET') {
-    return json(res, 200, { ok: true, ...publicClerkConfig() });
+    return json(res, 200, { ok: true, ...publicAuthConfig() });
+  }
+
+  if (pathname === '/api/auth/google' && method === 'GET') {
+    if (!isGoogleConfigured()) return authMissing(res);
+    const mode = url.searchParams.get('mode') === 'signup' ? 'signup' : 'signin';
+    const pkce = createPkce();
+    const token = oauthCookieValue(pkce);
+    const cookie = [
+      `${OAUTH_COOKIE}=${encodeURIComponent(token)}`,
+      'Path=/',
+      `Max-Age=${OAUTH_MAX_AGE}`,
+      'HttpOnly',
+      'SameSite=Lax',
+      cookieSecure(req) ? 'Secure' : ''
+    ].filter(Boolean).join('; ');
+    res.writeHead(302, {
+      location: googleAuthorizeUrl({ ...pkce, mode }),
+      'set-cookie': cookie,
+      'cache-control': 'no-store'
+    });
+    res.end();
+    return;
   }
 
   const { sql, db, status, error } = await withDb();
@@ -604,7 +613,7 @@ async function handleApi(req, res, url) {
       dbError: error || null,
       seed,
       user: publicUser(user),
-      clerk: publicClerkConfig(),
+      auth: publicAuthConfig(),
       season,
       week,
       weeks: weeksForSeason(games, season),
@@ -622,16 +631,66 @@ async function handleApi(req, res, url) {
   }
 
   if (pathname === '/api/login' && method === 'POST') {
-    if (!isClerkConfigured()) return authMissing(res);
+    if (!isGoogleConfigured()) return authMissing(res);
     if (!sql) return dbUnavailable(res, dbState);
     await readBody(req);
     const user = await currentUser(sql, req);
     if (!user) return signInRequired(res);
-    return json(res, 200, { ok: true, user: publicUser(user), clerk: publicClerkConfig() });
+    return json(res, 200, { ok: true, user: publicUser(user), auth: publicAuthConfig() });
   }
 
-  if (pathname === '/api/logout' && (method === 'POST' || method === 'GET')) {
-    return json(res, 200, { ok: true }, { 'set-cookie': clearCookie() });
+  if ((pathname === '/api/logout' || pathname === '/api/auth/sign-out') && (method === 'POST' || method === 'GET')) {
+    return json(res, 200, { ok: true }, { 'set-cookie': clearCookie(req) });
+  }
+
+  if (pathname === '/api/auth/google/callback' && method === 'GET') {
+    if (!isGoogleConfigured()) return authMissing(res);
+    const fail = (code) => {
+      res.writeHead(302, { location: `/?auth_error=${encodeURIComponent(code)}`, 'cache-control': 'no-store' });
+      res.end();
+    };
+    const code = url.searchParams.get('code');
+    const state = url.searchParams.get('state');
+    const pending = readOauthCookie(req.headers.cookie);
+    const clearOauth = [
+      `${OAUTH_COOKIE}=`,
+      'Path=/',
+      'Max-Age=0',
+      'HttpOnly',
+      'SameSite=Lax',
+      cookieSecure(req) ? 'Secure' : ''
+    ].filter(Boolean).join('; ');
+    if (!code || !state || !pending || !statesMatch(pending.state, state)) {
+      res.writeHead(302, { location: '/?auth_error=state', 'set-cookie': clearOauth, 'cache-control': 'no-store' });
+      res.end();
+      return;
+    }
+    if (!sql) {
+      res.writeHead(302, { location: '/?auth_error=database', 'set-cookie': clearOauth, 'cache-control': 'no-store' });
+      res.end();
+      return;
+    }
+    try {
+      const profile = await exchangeGoogleCode(code, pending.verifier);
+      const pool = await getPool(sql);
+      const user = await upsertGoogleUser(sql, pool, profile);
+      if (!user) return fail('user');
+      const session = signSession({
+        userId: user.id,
+        exp: Date.now() + 180 * 24 * 60 * 60 * 1000
+      });
+      res.writeHead(302, {
+        location: '/',
+        'cache-control': 'no-store',
+        'set-cookie': [sessionCookie(session, 60 * 60 * 24 * 180, req), clearOauth]
+      });
+      res.end();
+    } catch (err) {
+      console.error('google callback failed', err && err.message ? err.message : err);
+      res.writeHead(302, { location: '/?auth_error=google', 'set-cookie': clearOauth, 'cache-control': 'no-store' });
+      res.end();
+    }
+    return;
   }
 
   if (pathname === '/api/week' && method === 'GET') {
@@ -670,7 +729,7 @@ async function handleApi(req, res, url) {
       livePoll: Boolean(liveAttach.live && liveAttach.live.livePoll),
       liveReason: liveAttach.live && liveAttach.live.reason,
       user: publicUser(user),
-      clerk: publicClerkConfig()
+      auth: publicAuthConfig()
     });
   }
 

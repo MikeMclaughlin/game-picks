@@ -10,7 +10,17 @@ function runSql(sql, text, params = []) {
 }
 
 function cookieSecret() {
-  return process.env.SESSION_SECRET || process.env.ADMIN_KEY || 'game-picks-dev-secret';
+  return String(process.env.SESSION_SECRET || '').trim();
+}
+
+function cookieSecure(req) {
+  const headers = (req && req.headers) || {};
+  const proto = String(headers['x-forwarded-proto'] || '').split(',')[0].trim().toLowerCase();
+  if (proto === 'https') return true;
+  if (proto === 'http') return false;
+  const host = String(headers['x-forwarded-host'] || headers.host || '').split(',')[0].trim().toLowerCase();
+  if (/^(localhost|127\.0\.0\.1)(:\d+)?$/.test(host)) return false;
+  return true;
 }
 
 function signSession(payload) {
@@ -49,7 +59,7 @@ function parseCookies(header) {
   return out;
 }
 
-function sessionCookie(token, maxAge = 60 * 60 * 24 * 180) {
+function sessionCookie(token, maxAge = 60 * 60 * 24 * 180, req) {
   const parts = [
     `gp_session=${encodeURIComponent(token)}`,
     'Path=/',
@@ -57,13 +67,13 @@ function sessionCookie(token, maxAge = 60 * 60 * 24 * 180) {
     'HttpOnly',
     'SameSite=Lax'
   ];
-  if (process.env.VERCEL) parts.push('Secure');
+  if (cookieSecure(req)) parts.push('Secure');
   return parts.join('; ');
 }
 
-function clearCookie() {
+function clearCookie(req) {
   const parts = ['gp_session=', 'Path=/', 'Max-Age=0', 'HttpOnly', 'SameSite=Lax'];
-  if (process.env.VERCEL) parts.push('Secure');
+  if (cookieSecure(req)) parts.push('Secure');
   return parts.join('; ');
 }
 
@@ -174,6 +184,7 @@ async function getPool(sql, slug) {
 
 module.exports = {
   runSql,
+  cookieSecure,
   signSession,
   readSession,
   sessionCookie,

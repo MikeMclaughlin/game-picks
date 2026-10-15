@@ -3,66 +3,44 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const {
-  clerkPublishableKey,
-  isClerkConfigured,
-  frontendApiFromKey,
-  publicClerkConfig,
-  authNotConfiguredPayload,
-  extractSessionToken,
-  displayFromClerk,
-  sanitizeHandle
-} = require('../src/clerk-auth');
+  isGoogleConfigured,
+  publicAuthConfig,
+  publicBaseUrl,
+  googleRedirectUri,
+  codeChallenge,
+  createPkce,
+  displayFromGoogle,
+  sanitizeHandle,
+  statesMatch
+} = require('../src/google-auth');
 
-test('publishable key accepts Marketplace NEXT_PUBLIC_ name', () => {
-  const env = {
-    NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: 'pk_test_marketplace',
-    CLERK_SECRET_KEY: 'sk_test_marketplace'
-  };
-  assert.equal(clerkPublishableKey(env), 'pk_test_marketplace');
-  assert.equal(isClerkConfigured(env), true);
-  assert.equal(publicClerkConfig(env).configured, true);
-  assert.equal(publicClerkConfig(env).publishableKey, 'pk_test_marketplace');
+test('Google auth is configured only when id, secret, and session secret are set', () => {
+  assert.equal(isGoogleConfigured({}), false);
+  assert.equal(isGoogleConfigured({ GOOGLE_CLIENT_ID: 'id', GOOGLE_CLIENT_SECRET: 'sec' }), false);
+  const env = { GOOGLE_CLIENT_ID: 'id', GOOGLE_CLIENT_SECRET: 'sec', SESSION_SECRET: 'sess' };
+  assert.equal(isGoogleConfigured(env), true);
+  assert.equal(publicAuthConfig(env).provider, 'google');
+  assert.equal(publicAuthConfig({}).configured, false);
 });
 
-test('missing Clerk keys are not configured', () => {
-  const env = {};
-  assert.equal(isClerkConfigured(env), false);
-  const cfg = publicClerkConfig(env);
-  assert.equal(cfg.configured, false);
-  assert.equal(cfg.publishableKey, null);
-  assert.deepEqual(cfg.providers, ['google', 'x']);
-  const body = authNotConfiguredPayload();
-  assert.equal(body.ok, false);
-  assert.equal(body.auth, 'missing');
-  assert.match(body.error, /Auth not configured/);
-});
-
-test('frontend API domain is decoded from the publishable key', () => {
-  const domain = 'foo.clerk.accounts.dev';
-  const packed = Buffer.from(`${domain}$`).toString('base64').replace(/=+$/, '');
-  assert.equal(frontendApiFromKey(`pk_test_${packed}`), domain);
-});
-
-test('Bearer and __session cookies yield a token', () => {
+test('redirect URI uses PUBLIC_BASE_URL with no trailing slash', () => {
+  assert.equal(publicBaseUrl({}), 'https://game-picks.vercel.app');
+  assert.equal(publicBaseUrl({ PUBLIC_BASE_URL: 'https://example.com/' }), 'https://example.com');
   assert.equal(
-    extractSessionToken({ headers: { authorization: 'Bearer tok_abc' } }),
-    'tok_abc'
+    googleRedirectUri({ PUBLIC_BASE_URL: 'https://game-picks.onrender.com/' }),
+    'https://game-picks.onrender.com/api/auth/google/callback'
   );
-  assert.equal(
-    extractSessionToken({ headers: { cookie: '__session=sess%2D1; other=x' } }),
-    'sess-1'
-  );
-  assert.equal(extractSessionToken({ headers: {} }), null);
 });
 
-test('display name prefers Clerk username then full name', () => {
+test('PKCE challenge is the S256 hash of the verifier and state matches itself', () => {
+  const pkce = createPkce();
+  assert.equal(codeChallenge(pkce.verifier), pkce.challenge);
+  assert.equal(statesMatch(pkce.state, pkce.state), true);
+  assert.equal(statesMatch(pkce.state, `${pkce.state}x`), false);
+});
+
+test('display name prefers the Google profile name', () => {
   assert.equal(sanitizeHandle('Mike@Picks!'), 'MikePicks');
-  assert.equal(displayFromClerk({ username: 'FlyersFan', firstName: 'Mike' }).display, 'FlyersFan');
-  assert.equal(displayFromClerk({ firstName: 'Mike', lastName: 'M' }).display, 'Mike M');
-  assert.equal(
-    displayFromClerk({
-      emailAddresses: [{ emailAddress: 'picks@example.com' }]
-    }).display,
-    'picks'
-  );
+  assert.equal(displayFromGoogle({ name: 'Flyers Fan', email: 'picks@example.com', sub: '12345678' }).display, 'Flyers Fan');
+  assert.equal(displayFromGoogle({ email: 'picks@example.com', sub: '12345678' }).display, 'picks');
 });
