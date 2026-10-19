@@ -1392,8 +1392,16 @@
     if (total !== '—') {
       bits.push(`<span><b class="ou-word">OVER/UNDER</b> ${esc(total)}</span>`);
     }
+    let title = 'Favorite, spread, and over/under';
+    if (cardPhase(game) === 'pre') {
+      const bl = sidePickText(game && game.biggestLoser);
+      if (bl) {
+        bits.push(`<span><b>Biggest Loser</b> ${esc(bl)}</span>`);
+        title = 'Favorite, spread, over/under, and the Biggest Loser pick';
+      }
+    }
     if (!bits.length) return '';
-    return `<div class="line-peek" title="Favorite, spread, and over/under">${bits.join(' ')}</div>`;
+    return `<div class="line-peek" title="${esc(title)}">${bits.join(' ')}</div>`;
   }
 
   function scoreRow(game) {
