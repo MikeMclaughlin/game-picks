@@ -2,7 +2,7 @@
 
 const { roadTravel, teamAbbr, teamCity } = require('./teams');
 const { toNumber, scoresReady, isLocked, atsLetter, gradeAts, gradeOu, gradeWager } = require('./grader');
-const { kickoffSlot } = require('./kickoff-slot');
+const { kickoffSlot, formatKickoffEst } = require('./kickoff-slot');
 const { displayConfidence, getActiveMap, getActiveOuMap } = require('./calibration');
 
 const SHORT_REST_DAYS = 5;
@@ -877,6 +877,20 @@ function defaultExpanded() {
 }
 
 /**
+ * Settle-line color for a finished game: the ATS result of that game's
+ * Biggest Loser (bounce-back) pick. Green is a cover, red is a miss,
+ * push stays neutral, and no pick stays neutral.
+ */
+function bounceBackAtsTone(game) {
+  const pick = game && game.biggestLoser;
+  if (!pick || (!pick.team && !pick.selection)) return 'neutral';
+  if (pick.result === 'win') return 'cover';
+  if (pick.result === 'loss') return 'fail';
+  if (pick.result === 'push') return 'push';
+  return 'neutral';
+}
+
+/**
  * ATS color tone by whether the closing favorite covered.
  * Positive spread_line = home favored. Pick'ems and pushes stay neutral.
  */
@@ -936,7 +950,7 @@ function settleStrip(game) {
     coverText,
     totalText,
     text,
-    atsTone: coverText ? favoriteAtsTone(game, scores) || 'neutral' : null,
+    atsTone: coverText ? bounceBackAtsTone(game) : null,
     ouTone: totalText ? 'neutral' : null
   };
 }
@@ -1018,6 +1032,7 @@ function weekVersus(cards, options = {}) {
 function annotateCard(card) {
   return {
     ...card,
+    kickoffEst: card && card.kickoffEst ? card.kickoffEst : formatKickoffEst(card && card.kickoff),
     phase: cardPhase(card),
     settle: settleStrip(card)
   };
@@ -1227,6 +1242,7 @@ module.exports = {
   applyGameToRates,
   aiPick,
   settleStrip,
+  bounceBackAtsTone,
   favoriteAtsTone,
   compareWeekGames,
   cardPhase,

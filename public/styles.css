@@ -452,6 +452,14 @@ h1, h2 { margin: 0 0 8px; font-size: 22px; font-weight: 700; letter-spacing: 0.0
 }
 .abbrev-key b { color: var(--gold); font-weight: 700; }
 table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.picks-table-wrap { overflow-x: auto; }
+.picks-table tfoot td {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+  vertical-align: top;
+  border-top: 1px solid var(--gold);
+}
 th, td { text-align: left; padding: 6px 7px; border-bottom: 1px solid var(--line); }
 th { color: var(--muted); font-weight: 600; cursor: pointer; user-select: none; }
 th.sorted { color: var(--gold); }
