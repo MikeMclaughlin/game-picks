@@ -570,7 +570,7 @@ test('settle strip reports cover and under against the closing line', () => {
     total_line: 42.5
   });
   assert.equal(strip.text, 'TB covered +2.5 score was UNDER 42.5');
-  assert.equal(strip.atsTone, 'fail');
+  assert.equal(strip.atsTone, 'neutral');
   assert.equal(strip.ouTone, 'neutral');
   const miss = settleStrip({
     home_team: 'HOU',
@@ -581,18 +581,43 @@ test('settle strip reports cover and under against the closing line', () => {
     total_line: 42.5
   });
   assert.equal(miss.coverText, 'HOU did NOT cover 2.5');
-  assert.equal(miss.atsTone, 'fail');
+  assert.equal(miss.atsTone, 'neutral');
   assert.match(miss.totalText, /UNDER/);
-  const favCover = settleStrip({
+  const covered = settleStrip({
     home_team: 'HOU',
     away_team: 'TB',
     home_score: 24,
     away_score: 20,
     spread_line: 2.5,
-    total_line: 42.5
+    total_line: 42.5,
+    biggestLoser: { team: 'HOU', result: 'win' }
   });
-  assert.equal(favCover.atsTone, 'cover');
+  assert.equal(covered.coverText, 'HOU covered -2.5');
+  assert.equal(covered.atsTone, 'cover');
+  const missedPick = settleStrip({
+    home_team: 'HOU',
+    away_team: 'TB',
+    home_score: 24,
+    away_score: 20,
+    spread_line: 2.5,
+    total_line: 42.5,
+    biggestLoser: { team: 'TB', result: 'loss' }
+  });
+  assert.equal(missedPick.atsTone, 'fail');
+  assert.equal(missedPick.totalText, covered.totalText);
   const push = settleStrip({
+    home_team: 'HOU',
+    away_team: 'TB',
+    home_score: 22,
+    away_score: 20,
+    spread_line: 2,
+    total_line: 42,
+    biggestLoser: { team: 'HOU', result: 'push' }
+  });
+  assert.match(push.text, /push/);
+  assert.match(push.text, /PUSH 42/);
+  assert.equal(push.atsTone, 'push');
+  const noPick = settleStrip({
     home_team: 'HOU',
     away_team: 'TB',
     home_score: 22,
@@ -600,9 +625,8 @@ test('settle strip reports cover and under against the closing line', () => {
     spread_line: 2,
     total_line: 42
   });
-  assert.match(push.text, /push/);
-  assert.match(push.text, /PUSH 42/);
-  assert.equal(push.atsTone, 'push');
+  assert.equal(noPick.atsTone, 'neutral');
+  assert.equal(noPick.totalText, push.totalText);
 });
 
 test('favorite ATS tone follows closing favorite cover', () => {

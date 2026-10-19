@@ -73,6 +73,9 @@
     performanceSort: { key: 'week', dir: 'asc' },
     performancePickSort: { key: 'week', dir: 'asc' },
     performancePassSort: { key: 'rule', dir: 'asc' },
+    picks: null,
+    picksError: null,
+    picksSort: { key: 'game', dir: 'asc' },
     shareGame: null,
     shareSeason: null,
     shareMissing: false,
@@ -81,7 +84,8 @@
     forceHistory: false,
     forceBacktest: false,
     forcePerformance: false,
-    forceStandings: false
+    forceStandings: false,
+    forcePicks: false
   };
   let loadDepth = 0;
   let authConfigured = false;
@@ -234,6 +238,7 @@
   // Pick Performance and shared games also use real paths: /performance and /game/:season/:week/:gameId.
   const PAGE_HASH = {
     week: 'home',
+    picks: 'picks',
     standings: 'standings',
     history: 'history',
     backtest: 'backtest',
@@ -242,6 +247,7 @@
   const HASH_PAGE = {
     home: 'week',
     week: 'week',
+    picks: 'picks',
     standings: 'standings',
     history: 'history',
     backtest: 'backtest',
@@ -487,6 +493,9 @@
       state.performanceError = null;
       state.performanceLoading = true;
       state.forcePerformance = true;
+    } else if (page === 'picks') {
+      state.picksError = null;
+      state.forcePicks = true;
     }
   }
 
@@ -880,7 +889,8 @@
     const pendingWeek = state.page === 'week' && (!state.week || state.forceWeek) && !shareInvalid;
     const refreshing = (state.page === 'history' && state.forceHistory && state.history)
       || (state.page === 'backtest' && state.forceBacktest && state.backtest)
-      || (state.page === 'performance' && state.forcePerformance && state.performance);
+      || (state.page === 'performance' && state.forcePerformance && state.performance)
+      || (state.page === 'picks' && state.forcePicks && state.picks);
     if (!pendingWeek && !refreshing) render();
     try {
       if (pendingWeek) {
@@ -912,6 +922,13 @@
           const ids = performance.criteria.map((c) => c.id);
           if (!ids.includes(state.performanceCriterion)) state.performanceCriterion = ids[0];
         }
+      }
+      if (state.page === 'picks' && (!state.picks || state.forcePicks)) {
+        const picks = await api('/api/week');
+        if (gen !== loadGen) return;
+        state.forcePicks = false;
+        state.picks = picks;
+        state.picksError = null;
       }
       if (state.page === 'standings' && (!state.standings || state.forceStandings)) {
         const standings = await api('/api/standings');
@@ -966,6 +983,12 @@
       if (state.page === 'performance') {
         state.performanceError = (err && err.message) || 'Failed to load pick performance';
         state.performanceLoading = false;
+        render();
+        return;
+      }
+      if (state.page === 'picks') {
+        state.picksError = (err && err.message) || 'Failed to load picks';
+        state.forcePicks = false;
         render();
         return;
       }
@@ -1275,6 +1298,18 @@
     return null;
   }
 
+  function bounceBackTone(game) {
+    const pick = game && game.biggestLoser;
+    const team = pick && (pick.team || pick.selection);
+    if (!team) return 'neutral';
+    let result = pick.result;
+    if (!result && cardPhase(game) === 'final') result = gradeMarket(game, 'ats', team);
+    if (result === 'win') return 'cover';
+    if (result === 'loss') return 'fail';
+    if (result === 'push') return 'push';
+    return 'neutral';
+  }
+
   function settleParts(game) {
     if (cardPhase(game) !== 'final') return null;
     if (game.settle && (game.settle.coverText || game.settle.totalText || game.settle.text)) {
@@ -1319,16 +1354,7 @@
       else if (sum > total) totalText = `score was OVER ${shown}`;
       else totalText = `score was UNDER ${shown}`;
     }
-    let atsTone = 'neutral';
-    if (coverText && spread != null) {
-      const margin = home - away;
-      if (close(margin, spread)) atsTone = 'push';
-      else if (!close(spread, 0)) {
-        const homeFavored = spread > 0;
-        const homeCovered = margin > spread;
-        atsTone = (homeFavored ? homeCovered : !homeCovered) ? 'cover' : 'fail';
-      }
-    }
+    const atsTone = coverText ? bounceBackTone(game) : 'neutral';
     const text = [coverText, totalText].filter(Boolean).join(' ');
     if (!text) return null;
     return { coverText, totalText, atsTone, text };
@@ -1345,7 +1371,7 @@
       bits.push(`<span class="settle-ou">${esc(parts.totalText)}</span>`);
     }
     if (!bits.length) return '';
-    return `<div class="settle-strip" title="Closing spread and total: ATS colored by whether the favorite covered (green/red); O/U stays neutral">${bits.join(' ')}</div>`;
+    return `<div class="settle-strip" title="Closing spread and total. ATS color follows the Biggest Loser pick: green if that pick covered, red if it missed, neutral on a push or when that game has no Biggest Loser pick. O/U text stays neutral.">${bits.join(' ')}</div>`;
   }
 
   // Favorite, spread, and OVER/UNDER stay visible on a collapsed card that is not final.
@@ -1795,6 +1821,105 @@
       <span>Shared game · ${esc(game.away_team)} @ ${esc(game.home_team)} · Week ${esc(game.week)}, ${esc(game.season)}</span>
       <button type="button" class="chip" data-share-solo title="${esc(title)}">${label}</button>
     </div>`;
+  }
+
+  const PICKS_CRITERIA = {
+    game: 'Criteria',
+    ai: 'The model projects each team’s points from earlier games (shrunk toward a league average, then recent form, home and away, rest, and travel) and takes the side of that margin against the spread. This cell is that team and its spread, labeled the same way as an ATS pick, or a moneyline when a +10 dog is the projected winner (otherwise a +10 dog is a pass). A locked game keeps the pick frozen at kickoff. A dash means the side was passed: weeks 1–3 when the edge is under 3; a +9 to +9.5 dog; a dog getting +7 or more with a losing ATS record this season; a side that flipped before lock; a small home dog that just allowed 50 or more unless the edge is at least 6; or a road-favorite fade after a quarterback change when the backup is not the problem.',
+    biggest: 'Each game’s pick is the team with the highest margin of loss, or the lowest margin of victory, in its previous game. Ignored if that team’s spread is under 4 or over 9. No pick when neither team, or only one team, has a previous game, or when those previous margins tie.',
+    comeback: 'An underdog getting points this week (a pick’em is not a dog) whose previous same-season game missed the spread by 21 or more. That previous ATS margin is the team’s score margin plus the points it was getting.'
+  };
+
+  function aiPickText(game) {
+    const pick = (game && (game.aiPickDisplay || game.aiPick)) || {};
+    if (pick.ats) return pick.ats;
+    if (pick.ml) return pick.ml;
+    if (pick.atsTeam) return atsPickLabel(game, pick.atsTeam);
+    return '';
+  }
+
+  function sidePickText(pick) {
+    if (!pick) return '';
+    return pick.label || pick.team || '';
+  }
+
+  function picksSortValue(game, key) {
+    if (key === 'game') return Date.parse(game && game.kickoff) || 0;
+    if (key === 'ai') return aiPickText(game) || null;
+    if (key === 'biggest') return sidePickText(game.biggestLoser) || null;
+    if (key === 'comeback') return sidePickText(game.comebackKid) || null;
+    return null;
+  }
+
+  function comparePicksRows(a, b) {
+    const { key, dir } = state.picksSort;
+    const av = picksSortValue(a, key);
+    const bv = picksSortValue(b, key);
+    let cmp = 0;
+    if (av == null && bv == null) cmp = 0;
+    else if (av == null) cmp = 1;
+    else if (bv == null) cmp = -1;
+    else if (typeof av === 'string' || typeof bv === 'string') {
+      cmp = String(av).localeCompare(String(bv));
+    } else cmp = av - bv;
+    if (cmp === 0) cmp = compareWeekCards(a, b);
+    if (av == null || bv == null) return cmp;
+    return dir === 'asc' ? cmp : -cmp;
+  }
+
+  function picksTable(games) {
+    const cols = [
+      { key: 'game', label: 'Game', title: 'Matchup and kickoff in America/New_York as mm/dd/yyyy hh:mm EST' },
+      { key: 'ai', label: 'AI', title: 'Current-week AI pick: the team and spread (or moneyline) the Home card shows, or a dash when that game has no AI side' },
+      { key: 'biggest', label: 'Biggest Loser', title: 'Current-week Biggest Loser pick: the team and spread, or a dash when that game has no pick' },
+      { key: 'comeback', label: 'Comeback Kid', title: 'Current-week Comeback Kid pick: the underdog and spread, or a dash when that game has no pick' }
+    ];
+    const rows = [...(games || [])].sort(comparePicksRows);
+    const head = cols.map((col) => {
+      const on = state.picksSort.key === col.key;
+      const caret = on ? `<span class="caret">${state.picksSort.dir === 'asc' ? '▲' : '▼'}</span>` : '';
+      return `<th data-picks-sort="${esc(col.key)}" title="${esc(col.title)}" class="${on ? 'sorted' : ''}">${esc(col.label)}${caret}</th>`;
+    }).join('');
+    const body = rows.map((game) => {
+      const when = game.kickoffEst || '';
+      const ai = aiPickText(game);
+      const biggest = sidePickText(game.biggestLoser);
+      const comeback = sidePickText(game.comebackKid);
+      return `<tr>
+        <td>${esc(game.away_team)} @ ${esc(game.home_team)}${when ? `<div class="muted">${esc(when)}</div>` : ''}</td>
+        <td>${ai ? esc(ai) : '—'}</td>
+        <td>${biggest ? esc(biggest) : '—'}</td>
+        <td>${comeback ? esc(comeback) : '—'}</td>
+      </tr>`;
+    }).join('');
+    return `<div class="picks-table-wrap"><table class="picks-table">
+      <thead><tr>${head}</tr></thead>
+      <tbody>${body}</tbody>
+      <tfoot><tr>
+        <td>${esc(PICKS_CRITERIA.game)}</td>
+        <td>${esc(PICKS_CRITERIA.ai)}</td>
+        <td>${esc(PICKS_CRITERIA.biggest)}</td>
+        <td>${esc(PICKS_CRITERIA.comeback)}</td>
+      </tr></tfoot>
+    </table></div>`;
+  }
+
+  function picksView() {
+    if (state.picksError && !state.picks) {
+      return `<section class="panel"><h1>Picks</h1><p class="notice">${esc(state.picksError)}</p></section>`;
+    }
+    if (!state.picks) {
+      return `<section class="panel"><h1>Picks</h1><p class="hist-loading">Loading picks…</p></section>`;
+    }
+    const games = state.picks.games || [];
+    const week = state.picks.week;
+    const season = state.picks.season;
+    return `<section class="panel">
+      <h1>Picks</h1>
+      <p class="lede">Week ${esc(week)} · ${esc(season)}</p>
+      ${state.picksError ? `<p class="notice">${esc(state.picksError)}</p>` : ''}
+      ${games.length ? picksTable(games) : '<p class="notice">No games scheduled for this week yet.</p>'}
+    </section>`;
   }
 
   function weekView() {
@@ -2895,6 +3020,7 @@
       return;
     }
     if (state.page === 'week') app.innerHTML = weekView();
+    else if (state.page === 'picks') app.innerHTML = picksView();
     else if (state.page === 'standings') app.innerHTML = `<section class="panel"><h1>Standings</h1>${standingsTable((state.standings && state.standings.standings) || state.bootstrap.standings || [], true)}</section>`;
     else if (state.page === 'performance') app.innerHTML = performanceView();
     else if (state.page === 'history') app.innerHTML = historyView();
@@ -2954,6 +3080,14 @@
         if (key === 'projOver' && state.filters.projOver) state.filters.projUnder = false;
         if (key === 'projUnder' && state.filters.projUnder) state.filters.projOver = false;
         persistWeek();
+        render();
+        return;
+      }
+      const picksSort = e.target.closest('th[data-picks-sort]');
+      if (picksSort && state.page === 'picks') {
+        const key = picksSort.dataset.picksSort;
+        if (state.picksSort.key === key) state.picksSort.dir = state.picksSort.dir === 'asc' ? 'desc' : 'asc';
+        else state.picksSort = { key, dir: key === 'game' ? 'asc' : 'asc' };
         render();
         return;
       }
@@ -3143,7 +3277,7 @@
     };
   }
 
-  if (state.page === 'performance' || state.page === 'history' || state.page === 'backtest' || (state.page === 'week' && !state.shareGame)) {
+  if (state.page === 'performance' || state.page === 'history' || state.page === 'backtest' || state.page === 'picks' || (state.page === 'week' && !state.shareGame)) {
     syncLocation(state.page);
   }
 

@@ -42,7 +42,7 @@ const { listTeamAbbrs } = require('./teams');
 const { persistAiPicks, listAiPicks, listAiPicksByGameIds, applyAiSnapshots } = require('./ai-picks');
 const { historyWindow } = require('./seasons');
 const { BUILD } = require('./build');
-const { buildPerformance, performanceTotals } = require('./performance');
+const { buildPerformance, performanceTotals, attachCategoryPicks } = require('./performance');
 const { attachLiveScores, resolveLiveScores } = require('./espn-live');
 const { attachInjuries } = require('./espn-injuries');
 
@@ -602,7 +602,7 @@ async function handleApi(req, res, url) {
     );
     const liveAttach = await attachLiveScores(cards, { sql });
     const injuryAttach = await attachInjuries(liveAttach.cards, { sql });
-    const presented = presentWeek(injuryAttach.cards, user);
+    const presented = presentWeek(attachCategoryPicks(injuryAttach.cards, games, season), user);
     const performanceTotalsPayload = await loadPerformanceTotals(sql, games, season);
     const poolId = user ? user.pool_id : sql ? (await getPool(sql)).id : null;
     const board = poolId ? await standings(sql, poolId, season, week) : [];
@@ -714,7 +714,7 @@ async function handleApi(req, res, url) {
     );
     const liveAttach = await attachLiveScores(cards, { sql });
     const injuryAttach = await attachInjuries(liveAttach.cards, { sql });
-    const presented = presentWeek(injuryAttach.cards, user);
+    const presented = presentWeek(attachCategoryPicks(injuryAttach.cards, games, season), user);
     const weeks = weeksForSeason(games, season);
     const performanceTotalsPayload = await loadPerformanceTotals(sql, games, season);
     return json(res, 200, {

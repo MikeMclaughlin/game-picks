@@ -750,6 +750,31 @@ function marketSnap(criterion, market) {
   };
 }
 
+function viewCategoryPick(leg) {
+  if (!leg || !leg.selection) return null;
+  return {
+    team: leg.team || leg.selection,
+    label: leg.label || null,
+    result: leg.result || null
+  };
+}
+
+/** Same Biggest Loser and Comeback Kid legs Pick Performance uses, keyed onto week cards. */
+function attachCategoryPicks(cards, games, season) {
+  const seasonGames = regSeasonGames(games, season);
+  const ctx = { games, seasonGames, season: Number(season), aiById: new Map() };
+  const biggest = prepareBiggestLoser(ctx);
+  const comeback = prepareComebackKid(ctx);
+  return (cards || []).map((card) => {
+    const id = card && card.game_id;
+    return {
+      ...card,
+      biggestLoser: viewCategoryPick(id ? biggest.get(id) : null),
+      comebackKid: viewCategoryPick(id ? comeback.get(id) : null)
+    };
+  });
+}
+
 function performanceTotals(report) {
   const list = (report && report.criteria) || [];
   const byId = new Map(list.map((criterion) => [criterion.id, criterion]));
@@ -775,5 +800,6 @@ module.exports = {
   COMEBACK_KID_GLOSSARY,
   PASS_RULES,
   buildPerformance,
-  performanceTotals
+  performanceTotals,
+  attachCategoryPicks
 };
